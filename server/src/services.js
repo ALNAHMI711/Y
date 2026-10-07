@@ -40,7 +40,7 @@ export function createServices({ db, now = () => new Date(), notify = () => {} }
     let matched = 0;
     for (const s of sms) {
       const cands = db.prepare("SELECT * FROM transfers WHERE status='pending' AND amount=? ORDER BY id").all(s.amount);
-      const hit = cands.find((c) => (s.ref && c.ref && refHash(c.ref) === refHash(s.ref))) || (!s.ref ? cands.find((c) => !c.ref) : null);
+      const hit = cands.find((c) => (s.ref && c.ref && refHash(c.ref) === refHash(s.ref))) || (!s.ref && setting('sms_amount_only_match') === '1' && cands.filter((c) => !c.ref).length === 1 ? cands.find((c) => !c.ref) : null);
       if (hit) {
         creditTransfer(hit.id, 'auto', null);
         db.prepare('UPDATE sms_log SET matched_transfer=? WHERE id=?').run(hit.id, s.id);

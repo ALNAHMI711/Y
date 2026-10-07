@@ -93,6 +93,7 @@ export function openDb(path = ':memory:') {
   s.run('withdraw_daily_limit', '500000');
   s.run('withdraw_monthly_limit', '5000000');
   s.run('vendor_monthly_fee', '5000');
+  s.run('sms_amount_only_match', '0');
   return db;
 }
 

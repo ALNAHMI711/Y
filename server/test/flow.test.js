@@ -255,3 +255,28 @@ test('backups: create, list, download, restore, name safety', async () => {
   assert.equal((await (await J('GET', '/api/admin/backups', t)).json()).length, 2, 'retention keeps newest N');
   a.server.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('hardening: sync hides hidden products, image/price validation, amount-only SMS is opt-in', async () => {
+  const admin = await login('967700000001');
+  const pid = (await api('POST', '/api/admin/products', { token: admin, body: { name: 'مخفي لاحقاً', price: 10, stock: 1 } })).data.id;
+  await api('PUT', `/api/admin/products/${pid}`, { token: admin, body: { hidden: true } });
+  const full = (await api('GET', '/api/sync?since=0')).data;
+  assert.ok(!full.products.some((p) => p.id === pid), 'hidden product not in full sync');
+  const delta = (await api('GET', `/api/sync?since=${full.seq - 1}`)).data;
+  assert.ok(!delta.products.some((p) => p.id === pid));
+  assert.equal((await api('POST', '/api/admin/products', { token: admin, body: { name: 'x', price: 0, stock: 1 } })).status, 400);
+  assert.equal((await api('POST', '/api/admin/products', { token: admin, body: { name: 'x', price: 5, image: 'javascript:alert(1)' } })).status, 400);
+  assert.equal((await api('POST', '/api/admin/products', { token: admin, body: { name: 'x', price: 5, image: 'data:image/jpeg;base64,AAAA' } })).status, 200);
+  // amount-only matching: off by default, so a ref-less transfer is NOT auto-credited by a ref-less SMS
+  const u = await login('967799999999', 'مستخدم تحويل سادس علي');
+  const t = (await api('POST', '/api/transfers', { token: u, body: { amount: 777, proof_base64: Buffer.from('proof-1').toString('base64') } })).data;
+  await api('POST', '/api/sms/ingest', { headers: { 'x-ingest-key': 'k' }, body: { text: 'تم إيداع مبلغ 777 ر.ي' } });
+  assert.equal(app.db.prepare('SELECT status FROM transfers WHERE id=?').get(t.id).status, 'pending');
+  await api('PUT', '/api/admin/settings', { token: admin, body: { sms_amount_only_match: 1 } });
+  await api('POST', '/api/sms/ingest', { headers: { 'x-ingest-key': 'k' }, body: { text: 'اضيف 777 ر.ي دفع مشتريات' } });
+  assert.equal(app.db.prepare('SELECT status FROM transfers WHERE id=?').get(t.id).status, 'credited');
+  const mal = await fetch(base + '/%E0%A4%A');
+  assert.equal(mal.status, 400);
+  const idx = await fetch(base + '/');
+  assert.match(idx.headers.get('content-security-policy'), /script-src 'self'/);
+});

@@ -84,10 +84,11 @@ export function createApp(opts = {}) {
     const seq = one('SELECT COALESCE(MAX(seq),0) m FROM changes').m;
     const rows = q('SELECT DISTINCT entity, entity_id, op FROM changes WHERE seq>?', since);
     const out = { seq, products: [], zones: [], features: since === 0 ? q('SELECT key, enabled, label FROM features') : [], deleted: [] };
-    if (since === 0) { out.products = q('SELECT id,name,price,stock,cod_mode,variants,image,hidden FROM products'); out.zones = q('SELECT * FROM zones'); return out; }
+    const VIS = "hidden=0 AND (vendor_id IS NULL OR vendor_id IN (SELECT id FROM vendors WHERE status='active'))";
+    if (since === 0) { out.products = q(`SELECT id,name,price,stock,cod_mode,variants,image,hidden FROM products WHERE ${VIS}`); out.zones = q('SELECT * FROM zones'); return out; }
     for (const r of rows) {
       if (r.op === 'delete') { out.deleted.push({ entity: r.entity, id: r.entity_id }); continue; }
-      if (r.entity === 'products') { const p = one('SELECT id,name,price,stock,cod_mode,variants,image,hidden FROM products WHERE id=?', r.entity_id); if (p) out.products.push(p); }
+      if (r.entity === 'products') { const p = one(`SELECT id,name,price,stock,cod_mode,variants,image,hidden FROM products WHERE id=? AND ${VIS}`, r.entity_id); if (p) out.products.push(p); else out.deleted.push({ entity: 'products', id: r.entity_id }); }
       if (r.entity === 'zones') { const z = one('SELECT * FROM zones WHERE id=?', r.entity_id); if (z) out.zones.push(z); }
       if (r.entity === 'features') out.features = q('SELECT key, enabled, label FROM features');
     }
@@ -198,9 +199,11 @@ export function createApp(opts = {}) {
   function createProduct(user, vendorId, b) {
     if (!b.name) throw bad('اسم المنتج مطلوب');
     if (b.variants?.length) S.requireFeature('variants');
+    if (b.image != null && b.image !== '' && !(typeof b.image === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(b.image) && b.image.length <= 600_000)) throw bad('صورة غير صالحة (jpeg/png/webp، حتى 400KB تقريباً)');
+    if (intOf(b.price, 'السعر') < 1) throw bad('السعر يجب أن يكون أكبر من صفر');
     const cod = b.cod_mode ?? 'none';
     if (!['none', 'partial', 'full'].includes(cod)) throw bad('cod_mode غير صالح');
-    const r = run('INSERT INTO products(vendor_id,name,price,stock,cod_mode,variants,image) VALUES(?,?,?,?,?,?,?)', vendorId, b.name, intOf(b.price, 'السعر'), intOf(b.stock ?? 0, 'المخزون'), cod, JSON.stringify(b.variants ?? []), b.image ?? null);
+    const r = run('INSERT INTO products(vendor_id,name,price,stock,cod_mode,variants,image) VALUES(?,?,?,?,?,?,?)', vendorId, b.name, intOf(b.price, 'السعر'), intOf(b.stock ?? 0, 'المخزون'), cod, JSON.stringify(b.variants ?? []), b.image || null);
     S.change('products', r.lastInsertRowid);
     S.audit(user.id, 'product.create', { id: r.lastInsertRowid });
     if (vendorId) {
@@ -234,7 +237,7 @@ export function createApp(opts = {}) {
   });
   R('POST', '/api/admin/announcements', ADMIN, ({ user, body }) => { S.requireFeature('announcements'); const r = run('INSERT INTO announcements(text,placement) VALUES(?,?)', body.text, body.placement ?? 'home'); S.audit(user.id, 'announcement.create', body); return { id: r.lastInsertRowid }; });
   R('PUT', '/api/admin/settings', 'admin', ({ user, body }) => {
-    const allowed = ['commission_pct', 'escrow_days', 'withdraw_daily_limit', 'withdraw_monthly_limit', 'vendor_monthly_fee'];
+    const allowed = ['commission_pct', 'escrow_days', 'withdraw_daily_limit', 'withdraw_monthly_limit', 'vendor_monthly_fee', 'sms_amount_only_match'];
     for (const [k, v] of Object.entries(body)) { if (!allowed.includes(k)) throw bad(`إعداد غير معروف: ${k}`); S.setSetting(k, intOf(v, k)); }
     S.audit(user.id, 'settings.update', body); return { ok: true };
   });
@@ -435,10 +438,11 @@ export function createApp(opts = {}) {
     }
   }
   function serveStatic(p, res) {
-    let f = path.join(WEB_DIR, p === '/' ? 'index.html' : decodeURIComponent(p));
+    let dec; try { dec = decodeURIComponent(p); } catch { res.writeHead(400); return res.end('bad request'); }
+    let f = path.join(WEB_DIR, p === '/' ? 'index.html' : dec);
     if (!f.startsWith(WEB_DIR + path.sep) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) f = path.join(WEB_DIR, 'index.html');
     if (!fs.existsSync(f)) { res.writeHead(404); return res.end('not found'); }
-    res.writeHead(200, { 'content-type': MIME[path.extname(f)] ?? 'application/octet-stream' }); fs.createReadStream(f).pipe(res);
+    res.writeHead(200, { 'content-type': MIME[path.extname(f)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'" }); fs.createReadStream(f).pipe(res);
   }
   const server = http.createServer(handle);
   return { server, db, services: S, handle };
