@@ -54,7 +54,7 @@ docker run -d --name tw -p 3000:3000 -v tw-data:/data \
   -e ADMIN_PHONE=967700000001 -e SUPPORT_PHONE=... -e INGEST_KEY=... \
   -e WA_TOKEN=... -e WA_PHONE_ID=... -e ANTHROPIC_API_KEY=... thaqafat-watan
 ```
-(ملف Docker **لم يُجرَّب** هنا لعدم توفر docker.) ضع خلفه وكيلاً بـ HTTPS (Caddy/nginx/منصة استضافة).
+(ملف Docker **لم يُبنَ فعلياً**: لا يوجد docker daemon في بيئة التطوير. جرّبت فقط أمر التشغيل نفسه بالمسارات ذاتها.) ضع خلفه وكيلاً بـ HTTPS (Caddy/nginx/منصة استضافة).
 
 - **نسخ تلقائي**: لقطة يومية في `DATA_DIR/backups` تحتفظ بآخر `BACKUP_KEEP` (افتراضي 14)؛ ويدوياً من «التقارير ← نسخة احتياطية» أو `POST /api/admin/backups`.
 - **الاستعادة**: أوقف الخادم، انسخ ملف `app-….db` فوق `DATA_DIR/app.db` (واحذف `app.db-wal` و`app.db-shm`)، ثم شغّل الخادم. جُرّبت قراءة النسخة في الاختبارات.
