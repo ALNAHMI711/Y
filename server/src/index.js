@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createApp } from './app.js';
+import { whatsappSender } from './whatsapp.js';
 
 const dataDir = process.env.DATA_DIR ?? path.resolve('data');
 fs.mkdirSync(dataDir, { recursive: true });
@@ -18,6 +19,7 @@ if (encKey.length !== 32) throw new Error('ENC_KEY must be 64 hex chars');
 const { server, services } = createApp({
   dbPath: path.join(dataDir, 'app.db'), secret, encKey,
   adminPhone: process.env.ADMIN_PHONE, supportPhone: process.env.SUPPORT_PHONE,
+  whatsapp: whatsappSender({ token: process.env.WA_TOKEN, phoneId: process.env.WA_PHONE_ID, template: process.env.WA_TEMPLATE }),
   ingestKey: process.env.INGEST_KEY, devOtp: process.env.DEV_OTP === '1',
 });
 setInterval(() => services.releaseDue(), 60 * 60 * 1000).unref();

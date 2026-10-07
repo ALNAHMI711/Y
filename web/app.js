@@ -85,7 +85,7 @@ async function storeView() {
   const wrap = h('div', {});
   wrap.append(...(await api('GET', '/api/announcements').catch(() => [])).map((a) => h('div', { class: 'card' }, a.text)));
   wrap.append(h('div', { class: 'grid' }, prods.map((p) => h('div', { class: 'card' },
-    h('b', {}, p.name), h('div', { class: 'price' }, money(p.price)), h('div', { class: 'mute' }, p.stock > 0 ? `متوفر: ${p.stock}` : 'نفد'),
+    p.image ? h('img', { src: p.image, alt: p.name, style: 'width:100%;border-radius:8px' }) : null, h('b', {}, p.name), h('div', { class: 'price' }, money(p.price)), h('div', { class: 'mute' }, p.stock > 0 ? `متوفر: ${p.stock}` : 'نفد'),
     h('button', { disabled: p.stock < 1, onclick: () => { const l = st.cart.find((c) => c.product_id === p.id); l ? l.qty++ : st.cart.push({ product_id: p.id, qty: 1, name: p.name, price: p.price }); localStorage.tw_cart = JSON.stringify(st.cart); toast('أضيف إلى السلة'); render(); } }, 'أضف')))));
   if (st.cart.length) wrap.append(await cartView());
   return wrap;
@@ -147,6 +147,19 @@ async function driverView() {
     h('button', { onclick: guard(async () => { await api('POST', `/api/driver/orders/${s.order_id}/deliver`); render(); }) }, 'تم التسليم'))));
 }
 
+
+// ---------- image processor (runs in the browser; toggled by the image_processor feature) ----------
+async function processImage(file, enhance) {
+  const bmp = await createImageBitmap(file), S = 800, c = document.createElement('canvas'); c.width = c.height = S;
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, S, S);
+  const k = Math.min((S - 40) / bmp.width, (S - 40) / bmp.height);
+  if (enhance) x.filter = 'contrast(1.08) saturate(1.1) brightness(1.03)';
+  x.drawImage(bmp, (S - bmp.width * k) / 2, (S - bmp.height * k) / 2, bmp.width * k, bmp.height * k);
+  x.filter = 'none';
+  if (enhance) { x.strokeStyle = '#3d4a2a'; x.lineWidth = 14; x.strokeRect(7, 7, S - 14, S - 14); x.fillStyle = '#3d4a2a'; x.fillRect(0, S - 56, S, 56); x.fillStyle = '#d9c98a'; x.font = 'bold 28px sans-serif'; x.textAlign = 'center'; x.fillText('ثقافة وطن', S / 2, S - 18); }
+  return c.toDataURL('image/jpeg', 0.82);
+}
+
 // ---------- admin ----------
 let adminTab = 'preview';
 async function adminView() {
@@ -179,9 +192,11 @@ async function featuresPane() {
 }
 async function catalogPane() {
   const n = h('input', { placeholder: 'اسم المنتج' }), p = h('input', { type: 'number', placeholder: 'السعر' }), s = h('input', { type: 'number', placeholder: 'المخزون' });
+  let image = null; const enh = featureOn('image_processor');
+  const img = h('input', { type: 'file', accept: 'image/*', onchange: guard(async () => { if (img.files[0]) { image = await processImage(img.files[0], enh); toast(enh ? 'تمت معالجة الصورة' : 'تم تجهيز الصورة'); } }) });
   const c = h('select', {}, [['none', 'بدون دفع عند الاستلام'], ['partial', 'دفع جزئي'], ['full', 'دفع كامل عند الاستلام']].map(([v, l]) => h('option', { value: v }, l)));
   const zn = h('input', { placeholder: 'اسم المنطقة' }), zf = h('input', { type: 'number', placeholder: 'سعر التوصيل (0 = مجاني)' });
-  return h('div', {}, h('div', { class: 'card' }, h('h3', {}, 'منتج جديد'), n, p, s, c, h('button', { onclick: guard(async () => { await api('POST', '/api/admin/products', { name: n.value, price: Number(p.value), stock: Number(s.value), cod_mode: c.value }); toast('تم'); render(); }) }, 'إضافة')),
+  return h('div', {}, h('div', { class: 'card' }, h('h3', {}, 'منتج جديد'), n, p, s, c, h('div', { class: 'mute' }, enh ? 'صورة المنتج (تُحسَّن وتُؤطَّر تلقائياً)' : 'صورة المنتج'), img, h('button', { onclick: guard(async () => { await api('POST', '/api/admin/products', { name: n.value, price: Number(p.value), stock: Number(s.value), cod_mode: c.value, image }); toast('تم'); render(); }) }, 'إضافة')),
     h('div', { class: 'card' }, h('h3', {}, 'منطقة توصيل'), zn, zf, h('button', { onclick: guard(async () => { await api('POST', '/api/admin/zones', { name: zn.value, fee: Number(zf.value || 0), free: Number(zf.value || 0) === 0 }); toast('تم'); render(); }) }, 'حفظ')));
 }
 async function transfersPane() {
