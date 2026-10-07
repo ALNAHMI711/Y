@@ -199,6 +199,10 @@ export function createApp(opts = {}) {
     const r = run('INSERT INTO products(vendor_id,name,price,stock,cod_mode,variants,image) VALUES(?,?,?,?,?,?,?)', vendorId, b.name, intOf(b.price, 'السعر'), intOf(b.stock ?? 0, 'المخزون'), cod, JSON.stringify(b.variants ?? []), b.image ?? null);
     S.change('products', r.lastInsertRowid);
     S.audit(user.id, 'product.create', { id: r.lastInsertRowid });
+    if (vendorId) {
+      const shop = one('SELECT shop_name FROM vendors WHERE id=?', vendorId)?.shop_name;
+      for (const f of q('SELECT user_id FROM vendor_follows WHERE vendor_id=?', vendorId)) notify('user', f.user_id, `منتج جديد من ${shop}: ${b.name}`);
+    }
     return r.lastInsertRowid;
   }
 
@@ -243,6 +247,23 @@ export function createApp(opts = {}) {
     });
     S.audit(user.id, 'vendor.status', { id: v.id, status: body.status }); return { ok: true };
   });
+  R('POST', '/api/admin/vendors/:id/subscription', ADMIN, ({ user, params, body }) => {
+    S.requireFeature('vendors');
+    const v = one('SELECT * FROM vendors WHERE id=?', params.id); if (!v) throw notFound();
+    const months = intOf(body.months ?? 1, 'الأشهر'); if (months < 1 || months > 24) throw bad('عدد الأشهر غير صالح');
+    const amount = months * Number(S.setting('vendor_monthly_fee'));
+    const base = v.paid_until && new Date(v.paid_until) > now() ? new Date(v.paid_until) : now();
+    const until = new Date(base.getTime() + months * 30 * 86400000).toISOString();
+    tx(db, () => { run('UPDATE vendors SET paid_until=? WHERE id=?', until, v.id); S.ledger(0, 'vendor_fee', amount, `vendor:${v.id}`); });
+    S.audit(user.id, 'vendor.subscription', { id: v.id, months, amount }); return { paid_until: until, amount };
+  });
+  R('POST', '/api/admin/social/:id/stats', ADMIN, ({ user, params, body }) => {
+    if (!one('SELECT id FROM social_posts WHERE id=?', params.id)) throw notFound();
+    run('UPDATE social_posts SET views=?, likes=?, comments=? WHERE id=?', intOf(body.views ?? 0, 'views'), intOf(body.likes ?? 0, 'likes'), intOf(body.comments ?? 0, 'comments'), params.id);
+    S.audit(user.id, 'social.stats', { id: params.id, ...body }); return { ok: true };
+  });
+  R('GET', '/api/notifications', 'any', ({ user }) => q("SELECT id,text,at FROM outbox WHERE kind='user' AND target=? ORDER BY id DESC LIMIT 50", user.id));
+  R('GET', '/api/vendor/notifications', 'any', ({ user }) => { const v = vendorOf(user); return q("SELECT id,text,at FROM outbox WHERE kind='vendor' AND target=? ORDER BY id DESC LIMIT 50", v.id); });
   R('POST', '/api/admin/orders/:id/assign', ADMIN, async ({ user, params, body }) => {
     const o = one('SELECT * FROM orders WHERE id=?', params.id); if (!o) throw notFound();
     const d = one("SELECT id FROM users WHERE id=? AND role='driver'", body.driver_id); if (!d) throw bad('مندوب غير صالح');

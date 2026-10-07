@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS addresses(
 CREATE TABLE IF NOT EXISTS vendors(
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), shop_name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending', wallet_accounts TEXT DEFAULT '[]',
-  available INTEGER NOT NULL DEFAULT 0, pending INTEGER NOT NULL DEFAULT 0,
+  available INTEGER NOT NULL DEFAULT 0, pending INTEGER NOT NULL DEFAULT 0, paid_until TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS vendor_follows(user_id INTEGER, vendor_id INTEGER, PRIMARY KEY(user_id, vendor_id));
 CREATE TABLE IF NOT EXISTS contracts(
@@ -81,6 +81,7 @@ export const DEFAULT_FEATURES = [
 export function openDb(path = ':memory:') {
   const db = new DatabaseSync(path);
   db.exec(SCHEMA);
+  try { db.exec('ALTER TABLE vendors ADD COLUMN paid_until TEXT'); } catch { /* already present */ }
   const f = db.prepare('INSERT OR IGNORE INTO features(key, enabled, label) VALUES(?, 1, ?)');
   for (const [k, l] of DEFAULT_FEATURES) f.run(k, l);
   const s = db.prepare('INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)');

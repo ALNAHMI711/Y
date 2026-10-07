@@ -163,3 +163,23 @@ test('feature switches and sync', async () => {
   const s = (await api('GET', `/api/sync?since=${before}`)).data;
   assert.ok(s.products.some((p) => p.id === pid) && s.features.find((f) => f.key === 'vendors').enabled === 0);
 });
+
+test('vendor subscription, follower notifications and social stats', async () => {
+  const admin = await login('967700000001');
+  await api('PUT', '/api/admin/features/vendors', { token: admin, body: { enabled: true } });
+  const vendorId = app.db.prepare("SELECT id FROM vendors WHERE status='active'").get().id;
+  const sub = await api('POST', `/api/admin/vendors/${vendorId}/subscription`, { token: admin, body: { months: 2 } });
+  assert.equal(sub.data.amount, 10000);
+  const again = await api('POST', `/api/admin/vendors/${vendorId}/subscription`, { token: admin, body: { months: 1 } });
+  assert.ok(new Date(again.data.paid_until) > new Date(sub.data.paid_until), 'renewal extends from current expiry');
+  const v = await login('967733333333');
+  const f = await login('967766666666', 'متابع للمتجر خامس علي');
+  await api('POST', `/api/vendors/${vendorId}/follow`, { token: f });
+  await api('POST', '/api/vendor/products', { token: v, body: { name: 'حزام', price: 5000, stock: 3 } });
+  const n = await api('GET', '/api/notifications', { token: f });
+  assert.ok(n.data[0].text.includes('حزام'));
+  const post = (await api('POST', '/api/admin/social/publish', { token: admin, body: { product_id: 1, channels: ['facebook'] } })).data[0];
+  assert.equal(post.status, 'not_configured');
+  await api('POST', `/api/admin/social/${post.id}/stats`, { token: admin, body: { views: 100, likes: 7, comments: 2 } });
+  assert.equal((await api('GET', '/api/admin/reports', { token: admin })).data.social.views, 100);
+});
