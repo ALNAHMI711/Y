@@ -230,3 +230,28 @@ test('OTP requests are rate limited by default', async () => {
   assert.deepEqual(codes, [200, 200, 200, 200, 200, 429, 429]);
   a.server.close();
 });
+
+test('backups: create, list, download, restore, name safety', async () => {
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'twbk-'));
+  const a = createApp({ otpLimit: 1000, devOtp: true, adminPhone: '967700000001', backupDir: dir, backupKeep: 2, whatsapp: { async send() {} } });
+  await new Promise((r) => a.server.listen(0, r));
+  const b = `http://127.0.0.1:${a.server.address().port}`;
+  const J = async (m, p, t, body) => { const r = await fetch(b + p, { method: m, headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}) }, body: body ? JSON.stringify(body) : undefined }); return r; };
+  const o = await (await J('POST', '/api/auth/request-otp', null, { phone: '967700000001' })).json();
+  const t = (await (await J('POST', '/api/auth/verify', null, { phone: '967700000001', code: o.dev_code, name: 'مدير النظام الاول الرئيسي' })).json()).token;
+  await J('POST', '/api/admin/zones', t, { name: 'تعز', fee: 500 });
+  const made = await (await J('POST', '/api/admin/backups', t)).json();
+  assert.match(made.name, /^app-\d{8}T\d{6}Z\.db$/);
+  const file = Buffer.from(await (await J('GET', `/api/admin/backups/${made.name}`, t)).arrayBuffer());
+  const restored = path.join(dir, 'restored.db'); fs.writeFileSync(restored, file);
+  const rdb = new DatabaseSync(restored);
+  assert.equal(rdb.prepare("SELECT fee FROM zones WHERE name='تعز'").get().fee, 500, 'backup contains data');
+  rdb.close();
+  assert.equal((await J('GET', '/api/admin/backups/..%2F..%2Fetc%2Fpasswd', t)).status, 404);
+  assert.equal((await J('GET', '/api/admin/backups', null)).status, 401);
+  for (let i = 0; i < 3; i++) await (await import('../src/backup.js')).createBackup(a.db, dir, 2, new Date(Date.now() + (i + 1) * 1000));
+  assert.equal((await (await J('GET', '/api/admin/backups', t)).json()).length, 2, 'retention keeps newest N');
+  a.server.close(); fs.rmSync(dir, { recursive: true, force: true });
+});

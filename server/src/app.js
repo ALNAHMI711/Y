@@ -7,6 +7,7 @@ import { openDb, tx } from './db.js';
 import { createServices, parseWalletSms, refHash, normDigits } from './services.js';
 import { buildXlsx } from './xlsx.js';
 import { anthropicAnalyzer, ruleBasedAnalyzer, normalizeCard } from './copilot.js';
+import { createBackup, listBackups, isBackupName } from './backup.js';
 import { Router, HttpError, bad, forbidden, notFound, readJson, signToken, verifyToken, hashSecret, checkSecret, encrypt, decrypt, sha256, rateLimiter } from './util.js';
 
 const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web');
@@ -17,6 +18,7 @@ export function createApp(opts = {}) {
   const secret = opts.secret ?? crypto.randomBytes(32).toString('hex');
   const encKey = opts.encKey ?? crypto.randomBytes(32);
   const sender = opts.whatsapp ?? { async send(phone, text) { console.log(`[whatsapp:stub] -> ${phone}: ${text}`); } };
+  const backupDir = opts.backupDir ?? null;
   const supportPhone = opts.supportPhone ?? null;
   const ingestKey = opts.ingestKey ?? null;
   const devOtp = opts.devOtp ?? false;
@@ -329,6 +331,14 @@ export function createApp(opts = {}) {
     if (!r.changes) throw bad('الطلب غير موجود أو تم البت فيه');
     S.audit(user.id, 'copilot.decision', { id: params.id, decision: body.decision });
     return { ok: true, note: body.decision === 'approved' ? 'سُجّل الطلب في قائمة التنفيذ؛ التنفيذ والنشر يتمان بمراجعة مطوّر.' : undefined };
+  });
+
+  R('GET', '/api/admin/backups', 'admin', () => { if (!backupDir) throw bad('النسخ الاحتياطي غير مفعّل'); return listBackups(backupDir); });
+  R('POST', '/api/admin/backups', 'admin', async ({ user }) => { if (!backupDir) throw bad('النسخ الاحتياطي غير مفعّل'); const name = await createBackup(db, backupDir, opts.backupKeep ?? 14, now()); S.audit(user.id, 'backup.create', { name }); return { name }; });
+  R('GET', '/api/admin/backups/:name', 'admin', ({ user, params }) => {
+    if (!backupDir || !isBackupName(params.name) || !fs.existsSync(path.join(backupDir, params.name))) throw notFound();
+    S.audit(user.id, 'backup.download', { name: params.name });
+    return { __file: fs.readFileSync(path.join(backupDir, params.name)), name: params.name, type: 'application/octet-stream' };
   });
 
   // ================= Financial vault (two codes) =================

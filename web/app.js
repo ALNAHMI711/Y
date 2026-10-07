@@ -185,6 +185,7 @@ async function reportsPane() {
     h('div', { class: 'grid' }, stat('المستخدمون', r.users.total), stat('نشطون (30 يوماً)', r.users.active_30d), stat('جدد (7 أيام)', r.users.new_7d), stat('متاجر مفعّلة', r.vendors.active), stat('متاجر معلّقة', r.vendors.pending),
       stat('منتجات معروضة', r.inventory.listed), stat('وحدات بالمخزون', r.inventory.units), stat('منشورات التواصل', r.social.posts)),
     h('div', { class: 'card' }, h('h4', {}, 'أوشكت على النفاد'), r.inventory.low.map((p) => h('div', {}, `${p.name}: ${p.stock}`)), h('h4', {}, 'نفدت'), r.inventory.out.map((p) => h('div', {}, p.name))),
+    h('button', { class: 'ghost', onclick: guard(async () => { const m = await api('POST', '/api/admin/backups'); const res = await fetch(`${BASE}/api/admin/backups/${m.name}`, { headers: { authorization: `Bearer ${st.token}` } }); const b = await res.blob(); const a = h('a', { href: URL.createObjectURL(b), download: m.name }); a.click(); toast('تم إنشاء نسخة احتياطية وتنزيلها'); }) }, 'نسخة احتياطية'),
     h('button', { onclick: guard(async () => { const res = await fetch(BASE + '/api/admin/delivery-export', { headers: { authorization: `Bearer ${st.token}` } }); const b = await res.blob(); const a = h('a', { href: URL.createObjectURL(b), download: 'delivery.xlsx' }); a.click(); }) }, 'تصدير ملف التوصيل (Excel)'));
 }
 async function featuresPane() {
