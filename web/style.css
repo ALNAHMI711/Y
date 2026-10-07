@@ -1,0 +1,21 @@
+:root{--bg:#1f2418;--card:#2b3322;--ink:#ece8d6;--mute:#a7a98f;--acc:#d9c98a;--ok:#6fbf73;--bad:#e06b5e;--line:#434d35}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,"Segoe UI",Tahoma,sans-serif;line-height:1.5}
+header{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#3d4a2a;position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;flex:1;color:var(--acc)}
+nav{display:flex;gap:6px;flex-wrap:wrap}
+button,.btn{background:var(--acc);color:#1f2418;border:0;border-radius:8px;padding:8px 12px;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}button.danger{background:var(--bad)}button:disabled{opacity:.45;cursor:not-allowed}
+main{padding:14px;max-width:960px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+input,select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);background:#1a1e14;color:var(--ink);font:inherit;margin:4px 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.row>*{flex:1}.row>button{flex:0 0 auto}
+.mute{color:var(--mute);font-size:13px}.price{color:var(--acc);font-weight:700}
+.meter{width:130px;height:130px;border-radius:50%;display:grid;place-items:center;font-size:26px;font-weight:800;margin:auto}
+.green{background:conic-gradient(var(--ok) var(--p),#2d3326 0);color:var(--ok)}.red{background:conic-gradient(var(--bad) var(--p),#2d3326 0);color:var(--bad)}
+.meter span{background:var(--bg);width:100px;height:100px;border-radius:50%;display:grid;place-items:center}
+.dial{display:flex;gap:6px;justify-content:center;direction:ltr}.dial div{width:34px;text-align:center}
+.dial button{padding:2px 0;width:100%;background:var(--line);color:var(--ink)}.dial b{display:block;font-size:24px;padding:4px 0;background:#1a1e14;border-radius:6px}
+iframe{width:100%;height:520px;border:2px solid var(--line);border-radius:14px;background:#fff}
+.banner{background:#5b4b1a;color:#fff3c4;padding:6px 14px;text-align:center;font-size:14px}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid var(--line);text-align:right;font-size:14px}

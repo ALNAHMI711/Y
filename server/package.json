@@ -1,0 +1,12 @@
+{
+  "name": "thaqafat-watan-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Backend for Thaqafat Watan military supplies marketplace (zero external dependencies)",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "engines": { "node": ">=22.13" }
+}

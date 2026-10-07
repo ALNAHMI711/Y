@@ -1,0 +1,3 @@
+{ "name": "ثقافة وطن", "short_name": "ثقافة وطن", "start_url": "/", "display": "standalone", "dir": "rtl", "lang": "ar",
+  "background_color": "#1f2418", "theme_color": "#3d4a2a",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }] }
