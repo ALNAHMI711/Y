@@ -1,0 +1,35 @@
+name: Build Android APK
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - name: Point the app at your server
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [ -z "$API_BASE_URL" ]; then echo "Set repository variable API_BASE_URL (https://your-server)"; exit 1; fi
+          printf "window.TW_API_BASE = %s;\n" "$(node -e 'console.log(JSON.stringify(process.env.API_BASE_URL))')" > web/config.js
+      - run: npm install --no-audit --no-fund
+      - run: npx cap add android
+      - name: Android permissions (location for addresses/driver)
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<uses-permission android:name="android.permission.INTERNET" />#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />#' "$M"
+          grep -c ACCESS_FINE_LOCATION "$M"
+      - run: npx cap sync android
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thaqafat-watan-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

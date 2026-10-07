@@ -1,0 +1,6 @@
+{
+  "appId": "com.thaqafatwatan.app",
+  "appName": "ثقافة وطن",
+  "webDir": "web",
+  "server": { "androidScheme": "https" }
+}

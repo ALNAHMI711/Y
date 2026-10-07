@@ -1,5 +1,6 @@
 // Thaqafat Watan web app — vanilla JS, DOM built with h() so user data is never parsed as HTML.
 const $ = (s) => document.querySelector(s);
+const BASE = (window.TW_API_BASE || '').replace(/\/$/, '');
 const preview = new URLSearchParams(location.search).has('preview');
 const st = { token: localStorage.tw_token || null, me: null, tab: 'store', cart: JSON.parse(localStorage.tw_cart || '[]'), vault: null };
 const money = (n) => `${Number(n).toLocaleString('ar-YE')} ر.ي`;
@@ -15,7 +16,7 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 async function api(method, path, body, extra = {}) {
-  const r = await fetch(path, { method, headers: { 'content-type': 'application/json', ...(st.token ? { authorization: `Bearer ${st.token}` } : {}), ...extra }, body: body ? JSON.stringify(body) : undefined });
+  const r = await fetch(BASE + path, { method, headers: { 'content-type': 'application/json', ...(st.token ? { authorization: `Bearer ${st.token}` } : {}), ...extra }, body: body ? JSON.stringify(body) : undefined });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || 'حدث خطأ');
   return data;
@@ -133,7 +134,7 @@ async function ordersView() {
   const o = await api('GET', '/api/orders');
   return h('div', {}, q.length ? h('div', { class: 'card' }, `${q.length} طلب بانتظار الإرسال (دون اتصال)`) : null,
     o.map((x) => h('div', { class: 'card' }, h('b', {}, `طلب #${x.id}`), ` — ${x.status}`, h('div', { class: 'price' }, money(x.total)), x.cod_due ? h('div', { class: 'mute' }, `عند الاستلام: ${money(x.cod_due)}`) : null,
-      x.status === 'out_for_delivery' && featureOn('live_tracking') ? h('a', { class: 'btn', href: `/api/track/${x.track_token}`, target: '_blank' }, 'تتبع المندوب') : null)));
+      x.status === 'out_for_delivery' && featureOn('live_tracking') ? h('a', { class: 'btn', href: `${BASE}/api/track/${x.track_token}`, target: '_blank' }, 'تتبع المندوب') : null)));
 }
 
 // ---------- driver ----------
@@ -184,7 +185,7 @@ async function reportsPane() {
     h('div', { class: 'grid' }, stat('المستخدمون', r.users.total), stat('نشطون (30 يوماً)', r.users.active_30d), stat('جدد (7 أيام)', r.users.new_7d), stat('متاجر مفعّلة', r.vendors.active), stat('متاجر معلّقة', r.vendors.pending),
       stat('منتجات معروضة', r.inventory.listed), stat('وحدات بالمخزون', r.inventory.units), stat('منشورات التواصل', r.social.posts)),
     h('div', { class: 'card' }, h('h4', {}, 'أوشكت على النفاد'), r.inventory.low.map((p) => h('div', {}, `${p.name}: ${p.stock}`)), h('h4', {}, 'نفدت'), r.inventory.out.map((p) => h('div', {}, p.name))),
-    h('button', { onclick: guard(async () => { const res = await fetch('/api/admin/delivery-export', { headers: { authorization: `Bearer ${st.token}` } }); const b = await res.blob(); const a = h('a', { href: URL.createObjectURL(b), download: 'delivery.xlsx' }); a.click(); }) }, 'تصدير ملف التوصيل (Excel)'));
+    h('button', { onclick: guard(async () => { const res = await fetch(BASE + '/api/admin/delivery-export', { headers: { authorization: `Bearer ${st.token}` } }); const b = await res.blob(); const a = h('a', { href: URL.createObjectURL(b), download: 'delivery.xlsx' }); a.click(); }) }, 'تصدير ملف التوصيل (Excel)'));
 }
 async function featuresPane() {
   const f = await api('GET', '/api/features');

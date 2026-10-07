@@ -183,3 +183,12 @@ test('vendor subscription, follower notifications and social stats', async () =>
   await api('POST', `/api/admin/social/${post.id}/stats`, { token: admin, body: { views: 100, likes: 7, comments: 2 } });
   assert.equal((await api('GET', '/api/admin/reports', { token: admin })).data.social.views, 100);
 });
+
+test('CORS allows the mobile app origin only', async () => {
+  const ok = await fetch(base + '/api/features', { headers: { origin: 'https://localhost' } });
+  assert.equal(ok.headers.get('access-control-allow-origin'), 'https://localhost');
+  const pre = await fetch(base + '/api/orders', { method: 'OPTIONS', headers: { origin: 'https://localhost' } });
+  assert.equal(pre.status, 204);
+  const no = await fetch(base + '/api/features', { headers: { origin: 'https://evil.example' } });
+  assert.equal(no.headers.get('access-control-allow-origin'), null);
+});

@@ -1,0 +1,16 @@
+{
+  "name": "thaqafat-watan-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor wrapper that packages ./web as an Android app",
+  "scripts": {
+    "server": "npm --prefix server start",
+    "test": "npm --prefix server test",
+    "android:sync": "cap sync android"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0"
+  }
+}

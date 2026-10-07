@@ -21,6 +21,7 @@ export function createApp(opts = {}) {
   const devOtp = opts.devOtp ?? false;
   const adminPhone = opts.adminPhone ?? null;
   const now = opts.now ?? (() => new Date());
+  const corsOrigins = ['https://localhost', 'capacitor://localhost', ...(opts.corsOrigins ?? [])];
   db.exec('CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, kind TEXT, target INTEGER, text TEXT, at TEXT DEFAULT (datetime(\'now\')))');
   const notify = (kind, target, text) => db.prepare('INSERT INTO outbox(kind,target,text) VALUES(?,?,?)').run(kind, target, text);
   const S = createServices({ db, now, notify });
@@ -384,7 +385,11 @@ export function createApp(opts = {}) {
   const roleOk = (needed, role) => needed === 'any' || (needed === 'admin' && role === 'admin') || (needed === 'staff' && ['admin', 'staff'].includes(role)) || needed === role;
   async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
-    const send = (status, data, headers = {}) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'x-content-type-options': 'nosniff', ...headers }); res.end(JSON.stringify(data)); };
+    // CORS only for the packaged mobile app origins (and any extra origins configured)
+    const origin = req.headers.origin;
+    const cors = origin && corsOrigins.includes(origin) ? { 'access-control-allow-origin': origin, 'access-control-allow-headers': 'authorization, content-type, x-vault-token', 'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS', vary: 'Origin' } : {};
+    const send = (status, data, headers = {}) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'x-content-type-options': 'nosniff', ...cors, ...headers }); res.end(JSON.stringify(data)); };
+    if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
     try {
       if (!url.pathname.startsWith('/api/')) return serveStatic(url.pathname, res);
       const m = router.match(req.method, url.pathname);
@@ -396,7 +401,7 @@ export function createApp(opts = {}) {
       S.releaseDue();
       const body = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? await readJson(req) : {};
       const out = await m.route.handler({ user, params: m.params, query: url.searchParams, body, headers: req.headers });
-      if (out?.__file) { res.writeHead(200, { 'content-type': out.type, 'content-disposition': `attachment; filename="${out.name}"` }); return res.end(out.__file); }
+      if (out?.__file) { res.writeHead(200, { ...cors, 'content-type': out.type, 'content-disposition': `attachment; filename="${out.name}"` }); return res.end(out.__file); }
       send(200, out ?? { ok: true });
     } catch (e) {
       if (e instanceof HttpError) return send(e.status, { error: e.message });

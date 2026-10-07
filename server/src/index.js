@@ -20,6 +20,7 @@ const { server, services } = createApp({
   dbPath: path.join(dataDir, 'app.db'), secret, encKey,
   adminPhone: process.env.ADMIN_PHONE, supportPhone: process.env.SUPPORT_PHONE,
   whatsapp: whatsappSender({ token: process.env.WA_TOKEN, phoneId: process.env.WA_PHONE_ID, template: process.env.WA_TEMPLATE }),
+  corsOrigins: (process.env.CORS_ORIGINS ?? '').split(',').filter(Boolean),
   ingestKey: process.env.INGEST_KEY, devOtp: process.env.DEV_OTP === '1',
 });
 setInterval(() => services.releaseDue(), 60 * 60 * 1000).unref();
