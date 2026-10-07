@@ -17,7 +17,7 @@ async function login(phone, name = 'احمد محمد علي النهمي') {
   return v.data.token;
 }
 test.before(async () => {
-  app = createApp({ devOtp: true, adminPhone: '967700000001', ingestKey: 'k', supportPhone: '967700000099', now: () => clock, whatsapp: { async send(p, t) { sent.push([p, t]); } } });
+  app = createApp({ otpLimit: 1000, devOtp: true, adminPhone: '967700000001', ingestKey: 'k', supportPhone: '967700000099', now: () => clock, whatsapp: { async send(p, t) { sent.push([p, t]); } } });
   await new Promise((r) => app.server.listen(0, r));
   base = `http://127.0.0.1:${app.server.address().port}`;
 });
@@ -191,4 +191,42 @@ test('CORS allows the mobile app origin only', async () => {
   assert.equal(pre.status, 204);
   const no = await fetch(base + '/api/features', { headers: { origin: 'https://evil.example' } });
   assert.equal(no.headers.get('access-control-allow-origin'), null);
+});
+
+test('copilot: analysis card, normalisation, decision flow, rules fallback', async () => {
+  const admin = await login('967700000001');
+  assert.equal((await api('POST', '/api/admin/copilot', { token: admin, body: { request: 'قصير' } })).status, 400);
+  const r = await api('POST', '/api/admin/copilot', { token: admin, body: { request: 'أريد إضافة السحب التلقائي للرصيد للعملاء' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.engine, 'rules');
+  assert.ok(r.data.card.risks.length, 'money-related request flags risks');
+  assert.equal((await api('POST', `/api/admin/copilot/${r.data.id}/decision`, { token: admin, body: { decision: 'approved' } })).status, 200);
+  assert.equal((await api('POST', `/api/admin/copilot/${r.data.id}/decision`, { token: admin, body: { decision: 'rejected' } })).status, 400, 'decided once');
+  const cust = await login('967711111111');
+  assert.equal((await api('POST', '/api/admin/copilot', { token: cust, body: { request: 'طلب طويل بما يكفي' } })).status, 403);
+});
+
+test('copilot LLM output is validated and bad output falls back', async () => {
+  const { normalizeCard, extractJson } = await import('../src/copilot.js');
+  const c = normalizeCard(extractJson('نص {"summary":"s","feasibility":"WRONG","risks":"x","effort":"large"} نهاية'), 'req');
+  assert.equal(c.feasibility, 'medium'); assert.deepEqual(c.risks, []); assert.equal(c.effort, 'large');
+  const a2 = createApp({ otpLimit: 1000, devOtp: true, adminPhone: '967700000001', copilot: async () => { throw new Error('boom'); }, whatsapp: { async send() {} } });
+  await new Promise((r) => a2.server.listen(0, r));
+  const b = `http://127.0.0.1:${a2.server.address().port}`;
+  const j = (m, p, t, body) => fetch(b + p, { method: m, headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}) }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
+  const o = await j('POST', '/api/auth/request-otp', null, { phone: '967700000001' });
+  const v = await j('POST', '/api/auth/verify', null, { phone: '967700000001', code: o.dev_code, name: 'مدير النظام الاول الرئيسي' });
+  const out = await j('POST', '/api/admin/copilot', v.token, { request: 'إضافة تقييمات للمنتجات من العملاء' });
+  assert.equal(out.engine, 'rules');
+  a2.server.close();
+});
+
+test('OTP requests are rate limited by default', async () => {
+  const a = createApp({ devOtp: true, whatsapp: { async send() {} } });
+  await new Promise((r) => a.server.listen(0, r));
+  const u = `http://127.0.0.1:${a.server.address().port}/api/auth/request-otp`;
+  const codes = [];
+  for (let i = 0; i < 7; i++) codes.push((await fetch(u, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: '967788888888' }) })).status);
+  assert.deepEqual(codes, [200, 200, 200, 200, 200, 429, 429]);
+  a.server.close();
 });

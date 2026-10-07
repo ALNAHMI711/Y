@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS social_posts(
 CREATE TABLE IF NOT EXISTS driver_locations(driver_id INTEGER PRIMARY KEY, lat REAL, lng REAL, at TEXT);
 CREATE TABLE IF NOT EXISTS audit(
   id INTEGER PRIMARY KEY, actor INTEGER, action TEXT NOT NULL, detail TEXT, at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')));
+CREATE TABLE IF NOT EXISTS feature_requests(
+  id INTEGER PRIMARY KEY, requester INTEGER, request TEXT NOT NULL, card TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'analyzed', at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS changes(
   seq INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, entity_id INTEGER, op TEXT NOT NULL);
 `;

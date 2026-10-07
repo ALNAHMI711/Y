@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb, tx } from './db.js';
 import { createServices, parseWalletSms, refHash, normDigits } from './services.js';
 import { buildXlsx } from './xlsx.js';
+import { anthropicAnalyzer, ruleBasedAnalyzer, normalizeCard } from './copilot.js';
 import { Router, HttpError, bad, forbidden, notFound, readJson, signToken, verifyToken, hashSecret, checkSecret, encrypt, decrypt, sha256, rateLimiter } from './util.js';
 
 const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web');
@@ -26,7 +27,7 @@ export function createApp(opts = {}) {
   const notify = (kind, target, text) => db.prepare('INSERT INTO outbox(kind,target,text) VALUES(?,?,?)').run(kind, target, text);
   const S = createServices({ db, now, notify });
   const router = new Router();
-  const otpLimit = rateLimiter(5, 10 * 60 * 1000), vaultLimit = rateLimiter(8, 15 * 60 * 1000);
+  const otpLimit = rateLimiter(opts.otpLimit ?? 5, 10 * 60 * 1000), vaultLimit = rateLimiter(8, 15 * 60 * 1000);
   const q = (sql, ...a) => db.prepare(sql).all(...a);
   const one = (sql, ...a) => db.prepare(sql).get(...a);
   const run = (sql, ...a) => db.prepare(sql).run(...a);
@@ -309,11 +310,25 @@ export function createApp(opts = {}) {
     const out = (body.channels || []).map((c) => ({ id: run('INSERT INTO social_posts(product_id,channel,status) VALUES(?,?,?)', p.id, c, opts.social?.[c] ? 'published' : 'not_configured').lastInsertRowid, channel: c, status: opts.social?.[c] ? 'published' : 'not_configured' }));
     S.audit(user.id, 'social.publish', body); return out;
   });
-  R('POST', '/api/admin/copilot', 'admin', ({ body }) => {
-    // Placeholder analysis (rule-based). Replace with an LLM call; the card contract stays the same.
-    const text = String(body.request || '');
-    const hits = q('SELECT key,label FROM features').filter((f) => text.includes(f.label.split(' ')[0]));
-    return { card: { request: text, feasibility: 'needs_review', impact: 'يتطلب مراجعة هندسية', overlaps_with: hits, note: 'محلل مبدئي قائم على قواعد؛ اربطه بنموذج لغوي للتحليل الفعلي.' } };
+  R('POST', '/api/admin/copilot', 'admin', async ({ user, body }) => {
+    const request = String(body.request || '').trim();
+    if (request.length < 8 || request.length > 2000) throw bad('اكتب وصفاً واضحاً للميزة');
+    const feats = q('SELECT key,label FROM features');
+    const analyze = opts.copilot ?? anthropicAnalyzer({ apiKey: opts.anthropicKey, model: opts.copilotModel }) ?? ruleBasedAnalyzer(feats);
+    let card, engine = opts.copilot || opts.anthropicKey ? 'llm' : 'rules';
+    try { card = normalizeCard(await analyze(request, feats.map((f) => f.label).join('، ')), request); }
+    catch (e) { console.error('copilot failed:', e.message); engine = 'rules'; card = normalizeCard(await ruleBasedAnalyzer(feats)(request), request); }
+    const r = run('INSERT INTO feature_requests(requester,request,card) VALUES(?,?,?)', user.id, request, JSON.stringify(card));
+    S.audit(user.id, 'copilot.analyze', { id: r.lastInsertRowid, engine });
+    return { id: r.lastInsertRowid, engine, card };
+  });
+  R('GET', '/api/admin/copilot', 'admin', () => q('SELECT id,request,card,status,at FROM feature_requests ORDER BY id DESC LIMIT 50').map((r) => ({ ...r, card: JSON.parse(r.card) })));
+  R('POST', '/api/admin/copilot/:id/decision', 'admin', ({ user, params, body }) => {
+    if (!['approved', 'rejected'].includes(body.decision)) throw bad('قرار غير صالح');
+    const r = run("UPDATE feature_requests SET status=? WHERE id=? AND status='analyzed'", body.decision, params.id);
+    if (!r.changes) throw bad('الطلب غير موجود أو تم البت فيه');
+    S.audit(user.id, 'copilot.decision', { id: params.id, decision: body.decision });
+    return { ok: true, note: body.decision === 'approved' ? 'سُجّل الطلب في قائمة التنفيذ؛ التنفيذ والنشر يتمان بمراجعة مطوّر.' : undefined };
   });
 
   // ================= Financial vault (two codes) =================

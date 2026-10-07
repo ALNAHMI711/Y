@@ -164,9 +164,9 @@ async function processImage(file, enhance) {
 // ---------- admin ----------
 let adminTab = 'preview';
 async function adminView() {
-  const tabs = [['preview', 'المعاينة'], ['reports', 'التقارير'], ['features', 'الميزات'], ['catalog', 'المنتجات والمناطق'], ['transfers', 'التحويلات'], ['vault', 'الخزنة']];
+  const tabs = [['preview', 'المعاينة'], ['reports', 'التقارير'], ['features', 'الميزات'], ['catalog', 'المنتجات والمناطق'], ['transfers', 'التحويلات'], ['copilot', 'المساعد'], ['vault', 'الخزنة']];
   const bar = h('div', { class: 'row card' }, tabs.map(([k, l]) => h('button', { class: adminTab === k ? '' : 'ghost', onclick: () => { adminTab = k; render(); } }, l)));
-  const pages = { preview: previewPane, reports: reportsPane, features: featuresPane, catalog: catalogPane, transfers: transfersPane, vault: vaultPane };
+  const pages = { preview: previewPane, reports: reportsPane, features: featuresPane, catalog: catalogPane, transfers: transfersPane, copilot: copilotPane, vault: vaultPane };
   return h('div', {}, bar, await pages[adminTab]());
 }
 async function previewPane() {
@@ -205,6 +205,25 @@ async function transfersPane() {
   return h('div', {}, t.length ? null : h('div', { class: 'card mute' }, 'لا توجد تحويلات معلّقة'), t.map((x) => h('div', { class: 'card row' }, `#${x.id} — مستخدم ${x.user_id} — ${money(x.amount)} — ${x.ref ?? ''}`,
     h('button', { onclick: guard(async () => { await api('POST', `/api/admin/transfers/${x.id}/approve`); render(); }) }, 'اعتماد'),
     h('button', { class: 'danger', onclick: guard(async () => { await api('POST', `/api/admin/transfers/${x.id}/reject`); render(); }) }, 'رفض'))));
+}
+
+
+const LV = { high: 'عالية', medium: 'متوسطة', low: 'منخفضة', small: 'صغير', large: 'كبير' };
+function cardView(x) {
+  const c = x.card, list = (t, a) => (a.length ? h('div', {}, h('b', {}, t), h('ul', {}, a.map((i) => h('li', {}, i)))) : null);
+  return h('div', { class: 'card' }, h('div', { class: 'mute' }, x.request), h('p', {}, c.summary),
+    h('div', {}, `الجدوى: ${LV[c.feasibility]} — الجهد: ${LV[c.effort] ?? c.effort}`), h('div', {}, c.impact),
+    list('مخاطر', c.risks), list('قد تتأثر', c.conflicts), list('بدائل أفضل', c.better_alternatives),
+    x.status === 'analyzed' ? h('div', { class: 'row' },
+      h('button', { onclick: guard(async () => { const r = await api('POST', `/api/admin/copilot/${x.id}/decision`, { decision: 'approved' }); toast(r.note); render(); }) }, 'موافق'),
+      h('button', { class: 'danger', onclick: guard(async () => { await api('POST', `/api/admin/copilot/${x.id}/decision`, { decision: 'rejected' }); render(); }) }, 'رفض')) : h('div', { class: 'mute' }, x.status === 'approved' ? '✔ معتمد — بانتظار التنفيذ' : '✖ مرفوض'));
+}
+async function copilotPane() {
+  const t = h('input', { placeholder: 'صف الميزة التي تريدها...' });
+  const list = await api('GET', '/api/admin/copilot');
+  return h('div', {}, h('div', { class: 'card' }, h('div', { class: 'mute' }, 'يحلل المساعد الطلب ويعرض الجدوى والمخاطر. الاعتماد يسجّل الطلب فقط؛ التنفيذ والنشر يتمان بمراجعة مطوّر.'), t,
+    h('button', { onclick: guard(async () => { const r = await api('POST', '/api/admin/copilot', { request: t.value }); toast(r.engine === 'llm' ? 'تم التحليل' : 'تحليل مبدئي (بدون نموذج لغوي)'); render(); }) }, 'حلّل')),
+    list.map(cardView));
 }
 
 // ---------- vault: 10-wheel dial ----------
