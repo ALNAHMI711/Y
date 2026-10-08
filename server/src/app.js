@@ -241,7 +241,7 @@ export function createApp(opts = {}) {
     for (const [k, v] of Object.entries(body)) { if (!allowed.includes(k)) throw bad(`إعداد غير معروف: ${k}`); S.setSetting(k, intOf(v, k)); }
     S.audit(user.id, 'settings.update', body); return { ok: true };
   });
-  R('GET', '/api/admin/vendors', ADMIN, () => q('SELECT id,user_id,shop_name,status,available,pending,created_at FROM vendors'));
+  R('GET', '/api/admin/vendors', ADMIN, () => q('SELECT id,user_id,shop_name,status,available,pending,paid_until,created_at,(SELECT id FROM contracts WHERE vendor_id=vendors.id ORDER BY id DESC LIMIT 1) contract_id FROM vendors'));
   R('GET', '/api/admin/contracts/:id', 'admin', ({ user, params }) => { const c = one('SELECT * FROM contracts WHERE id=?', params.id); if (!c) throw notFound(); S.audit(user.id, 'contract.view', { id: c.id }); return { ...c, data_enc: undefined, data: JSON.parse(decrypt(c.data_enc, encKey)) }; });
   R('POST', '/api/admin/vendors/:id/status', ADMIN, ({ user, params, body }) => {
     if (!['active', 'pending', 'suspended', 'deleted'].includes(body.status)) throw bad('حالة غير صالحة');

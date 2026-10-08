@@ -50,6 +50,7 @@ function renderNav() {
   const nav = $('#nav'); nav.replaceChildren();
   if (!st.me || preview) return;
   const tabs = [['store', 'المتجر'], ['wallet', 'المحفظة'], ['orders', 'طلباتي']];
+  if (featureOn('vendors')) tabs.push(['vendor', 'التاجر']);
   if (['admin', 'staff'].includes(st.me.role)) tabs.push(['admin', 'الإدارة']);
   if (st.me.role === 'driver') tabs.push(['driver', 'المندوب']);
   for (const [k, l] of tabs) nav.append(h('button', { class: st.tab === k ? '' : 'ghost', onclick: () => { st.tab = k; render(); } }, l));
@@ -60,7 +61,7 @@ async function render() {
   if (!st.token) return app.append(loginView());
   if (!st.me) { try { st.me = await api('GET', '/api/me'); } catch { st.token = null; return render(); } }
   renderNav();
-  const views = { store: storeView, wallet: walletView, orders: ordersView, admin: adminView, driver: driverView };
+  const views = { store: storeView, wallet: walletView, orders: ordersView, admin: adminView, driver: driverView, vendor: vendorView };
   try { app.append(await views[st.tab]()); } catch (e) { app.append(h('div', { class: 'card' }, e.message)); }
 }
 
@@ -161,12 +162,39 @@ async function processImage(file, enhance) {
   return c.toDataURL('image/jpeg', 0.82);
 }
 
+
+// ---------- vendor ----------
+function fileToJpeg(file, max = 1000) {
+  return createImageBitmap(file).then((bmp) => { const k = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.8); });
+}
+async function vendorView() {
+  let d; try { d = await api('GET', '/api/vendor/statement'); } catch { return vendorRegisterView(); }
+  const v = d.vendor, stat = (t, x) => h('div', { class: 'card' }, h('div', { class: 'mute' }, t), h('div', { class: 'price', style: 'font-size:22px' }, money(x)));
+  const prov = h('input', { placeholder: 'المحفظة (جيب، الكريمي...)' }), num = h('input', { placeholder: 'رقم الحساب', inputmode: 'numeric' });
+  const wsel = h('select', {}, v.wallet_accounts.map((a) => h('option', { value: a.number }, `${a.provider} — ${a.number}`))), wamt = h('input', { type: 'number', placeholder: 'المبلغ' });
+  const pn = h('input', { placeholder: 'اسم المنتج' }), pp = h('input', { type: 'number', placeholder: 'السعر' }), ps = h('input', { type: 'number', placeholder: 'المخزون' });
+  return h('div', {}, h('h3', {}, v.shop_name), h('div', { class: 'grid' }, stat('متاح للسحب', v.available), stat('محجوز (35 يوماً)', v.pending)),
+    h('div', { class: 'card' }, h('h4', {}, 'حساباتي في المحافظ'), v.wallet_accounts.map((a) => h('div', {}, `${a.provider}: ${a.number}`)), prov, num,
+      h('button', { onclick: guard(async () => { await api('PUT', '/api/vendor/accounts', { accounts: [...v.wallet_accounts, { provider: prov.value, number: num.value }] }); render(); }) }, 'إضافة حساب')),
+    h('div', { class: 'card' }, h('h4', {}, 'سحب'), wsel, wamt, h('button', { onclick: guard(async () => { await api('POST', '/api/vendor/withdraw', { account: wsel.value, amount: Number(wamt.value) }); toast('تم تسجيل طلب السحب'); render(); }) }, 'اسحب')),
+    h('div', { class: 'card' }, h('h4', {}, 'منتج جديد'), pn, pp, ps, h('button', { onclick: guard(async () => { await api('POST', '/api/vendor/products', { name: pn.value, price: Number(pp.value), stock: Number(ps.value) }); toast('أضيف المنتج'); render(); }) }, 'إضافة')),
+    h('div', { class: 'card' }, h('h4', {}, 'المبالغ المحجوزة'), h('table', {}, d.escrow.map((e) => h('tr', {}, h('td', {}, `طلب #${e.order_id}`), h('td', {}, money(e.amount)), h('td', { class: 'mute' }, `${e.release_at.slice(0, 10)} — ${e.status}`))))));
+}
+function vendorRegisterView() {
+  const f = {}; const inp = (k, ph) => (f[k] = h('input', { placeholder: ph }));
+  const imgs = {}; const pick = (k, label) => h('label', { class: 'mute' }, label, h('input', { type: 'file', accept: 'image/*', onchange: guard(async (e) => { if (e.target.files[0]) { imgs[k] = await fileToJpeg(e.target.files[0]); toast('تم تجهيز الصورة'); } }) }));
+  return h('div', { class: 'card' }, h('h3', {}, 'تسجيل متجر'), h('div', { class: 'mute' }, 'بياناتك وصور البطاقة تُحفظ مشفّرة ولا تظهر للجمهور؛ يظهر اسم المتجر ومنتجاته فقط. بعد الإرسال تراجع الإدارة العقد وتفعّل حسابك.'),
+    inp('full_name', 'الاسم الرباعي'), inp('shop_name', 'اسم المحل'), inp('location', 'موقع المحل'), inp('id_number', 'رقم البطاقة الشخصية'),
+    pick('id_front_b64', 'صورة البطاقة (الوجه)'), pick('id_back_b64', 'صورة البطاقة (الخلف)'), inp('signature', 'التوقيع: اكتب اسمك الكامل للموافقة على شروط العقد'),
+    h('button', { onclick: guard(async () => { const c = { ...Object.fromEntries(Object.entries(f).map(([k, el]) => [k, el.value])), ...imgs }; const r = await api('POST', '/api/vendors/register', { contract: c }); toast('أُرسل العقد للمراجعة'); st.tab = 'store'; render(); }) }, 'إرسال العقد'));
+}
+
 // ---------- admin ----------
 let adminTab = 'preview';
 async function adminView() {
-  const tabs = [['preview', 'المعاينة'], ['reports', 'التقارير'], ['features', 'الميزات'], ['catalog', 'المنتجات والمناطق'], ['transfers', 'التحويلات'], ['copilot', 'المساعد'], ['vault', 'الخزنة']];
+  const tabs = [['preview', 'المعاينة'], ['reports', 'التقارير'], ['features', 'الميزات'], ['catalog', 'المنتجات والمناطق'], ['vendors', 'التجار'], ['transfers', 'التحويلات'], ['copilot', 'المساعد'], ['vault', 'الخزنة']];
   const bar = h('div', { class: 'row card' }, tabs.map(([k, l]) => h('button', { class: adminTab === k ? '' : 'ghost', onclick: () => { adminTab = k; render(); } }, l)));
-  const pages = { preview: previewPane, reports: reportsPane, features: featuresPane, catalog: catalogPane, transfers: transfersPane, copilot: copilotPane, vault: vaultPane };
+  const pages = { preview: previewPane, reports: reportsPane, features: featuresPane, catalog: catalogPane, vendors: vendorsPane, transfers: transfersPane, copilot: copilotPane, vault: vaultPane };
   return h('div', {}, bar, await pages[adminTab]());
 }
 async function previewPane() {
@@ -208,6 +236,20 @@ async function transfersPane() {
     h('button', { class: 'danger', onclick: guard(async () => { await api('POST', `/api/admin/transfers/${x.id}/reject`); render(); }) }, 'رفض'))));
 }
 
+
+
+const VST = { pending: 'قيد المراجعة', active: 'مفعّل', suspended: 'موقوف', deleted: 'محذوف' };
+async function vendorsPane() {
+  const vs = await api('GET', '/api/admin/vendors');
+  const setSt = (id, status) => guard(async () => { await api('POST', `/api/admin/vendors/${id}/status`, { status }); render(); });
+  return h('div', {}, vs.length ? null : h('div', { class: 'card mute' }, 'لا يوجد تجار'), vs.map((v) => h('div', { class: 'card' }, h('b', {}, v.shop_name), ` — ${VST[v.status]}`,
+    h('div', { class: 'mute' }, `متاح ${money(v.available)} | محجوز ${money(v.pending)} | اشتراك حتى ${v.paid_until ? v.paid_until.slice(0, 10) : '—'}`),
+    h('div', { class: 'row' },
+      h('button', { class: 'ghost', onclick: guard(async () => { const c = await api('GET', `/api/admin/contracts/${v.contract_id}`); alert(`${c.data.full_name}\nالمحل: ${c.data.shop_name}\nالموقع: ${c.data.location ?? ''}\nرقم البطاقة: ${c.data.id_number}`); }) }, 'عرض العقد'),
+      v.status !== 'active' ? h('button', { onclick: setSt(v.id, 'active') }, 'تفعيل') : h('button', { class: 'ghost', onclick: setSt(v.id, 'suspended') }, 'إيقاف'),
+      h('button', { class: 'ghost', onclick: guard(async () => { const r = await api('POST', `/api/admin/vendors/${v.id}/subscription`, { months: 1 }); toast(`سُجّل اشتراك شهر: ${money(r.amount)}`); render(); }) }, 'تسجيل اشتراك'),
+      h('button', { class: 'danger', onclick: () => confirm('حذف التاجر وإخفاء منتجاته؟') && setSt(v.id, 'deleted')() }, 'حذف')))));
+}
 
 const LV = { high: 'عالية', medium: 'متوسطة', low: 'منخفضة', small: 'صغير', large: 'كبير' };
 function cardView(x) {
