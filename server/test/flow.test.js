@@ -280,3 +280,11 @@ test('hardening: sync hides hidden products, image/price validation, amount-only
   const idx = await fetch(base + '/');
   assert.match(idx.headers.get('content-security-policy'), /script-src 'self'/);
 });
+
+test('vendor/me reports registration state', async () => {
+  const u = await login('967788000001', 'مستخدم حالة تاجر رباعي');
+  assert.equal((await api('GET', '/api/vendor/me', { token: u })).data.status, 'none');
+  await api('POST', '/api/vendors/register', { token: u, body: { contract: { full_name: 'a b c d', shop_name: 'متجر حالة', signature: 'x', id_number: '1', id_front_b64: 'AA', id_back_b64: 'BB' } } });
+  assert.deepEqual((await api('GET', '/api/vendor/me', { token: u })).data.status, 'pending');
+  assert.equal((await api('GET', '/api/vendor/me')).status, 401);
+});

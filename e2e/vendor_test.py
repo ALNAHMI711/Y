@@ -39,6 +39,8 @@ try:
         files.nth(0).set_input_files(WORK + '/id.png'); v.wait_for_selector('#banner:has-text("الصورة")'); files.nth(1).set_input_files(WORK + '/id.png'); v.wait_for_timeout(600)
         v.click('button:has-text("إرسال العقد")'); v.wait_for_selector('#banner:has-text("أُرسل العقد")')
         check('contract submitted', True)
+        v.click('nav button:has-text("التاجر")'); v.wait_for_selector('h3:has-text("محل النخبة")')
+        check('pending vendor sees review status, not the registration form', 'قيد المراجعة' in v.inner_text('#app') and 'تسجيل متجر' not in v.inner_text('#app'))
 
         login(a, '967700000001', 'مدير النظام الاول الرئيسي'); a.click('nav button:has-text("الإدارة")'); a.click('button:text-is("التجار")')
         a.wait_for_selector('.card:has-text("محل النخبة")'); check('admin sees pending vendor', 'قيد المراجعة' in a.inner_text('#app'))

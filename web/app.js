@@ -168,7 +168,13 @@ function fileToJpeg(file, max = 1000) {
   return createImageBitmap(file).then((bmp) => { const k = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.8); });
 }
 async function vendorView() {
-  let d; try { d = await api('GET', '/api/vendor/statement'); } catch { return vendorRegisterView(); }
+  const me = await api('GET', '/api/vendor/me');
+  if (me.status === 'none') return vendorRegisterView();
+  if (me.status !== 'active') {
+    const msg = { pending: 'عقدك قيد المراجعة من الإدارة. ستتمكن من إضافة المنتجات بعد التفعيل.', suspended: 'حساب متجرك موقوف مؤقتاً. تواصل مع الإدارة.', deleted: 'حساب هذا المتجر محذوف.' }[me.status];
+    return h('div', { class: 'card' }, h('h3', {}, me.shop_name), h('div', { class: 'price' }, { pending: 'قيد المراجعة', suspended: 'موقوف', deleted: 'محذوف' }[me.status]), h('p', {}, msg));
+  }
+  const d = await api('GET', '/api/vendor/statement');
   const v = d.vendor, stat = (t, x) => h('div', { class: 'card' }, h('div', { class: 'mute' }, t), h('div', { class: 'price', style: 'font-size:22px' }, money(x)));
   const prov = h('input', { placeholder: 'المحفظة (جيب، الكريمي...)' }), num = h('input', { placeholder: 'رقم الحساب', inputmode: 'numeric' });
   const wsel = h('select', {}, v.wallet_accounts.map((a) => h('option', { value: a.number }, `${a.provider} — ${a.number}`))), wamt = h('input', { type: 'number', placeholder: 'المبلغ' });

@@ -174,6 +174,7 @@ export function createApp(opts = {}) {
     return { vendor_id: r, status: 'pending' };
   });
   const vendorOf = (user) => { const v = one("SELECT * FROM vendors WHERE user_id=? AND status='active'", user.id); if (!v) throw forbidden('حساب التاجر غير مفعّل'); return v; };
+  R('GET', '/api/vendor/me', 'any', ({ user }) => { const v = one('SELECT id,shop_name,status FROM vendors WHERE user_id=?', user.id); return v ?? { status: 'none' }; });
   R('PUT', '/api/vendor/accounts', 'any', ({ user, body }) => {
     const v = vendorOf(user);
     const accs = (body.accounts || []).map((a) => ({ provider: String(a.provider), number: String(a.number) }));
