@@ -27,12 +27,16 @@ try:
     cust = token('967755000111', 'عميل توصيل رباعي الاسم')
     addr = api('POST', '/api/addresses', {'label': 'المنزل', 'zone_id': zone, 'lat': 15.35, 'lng': 44.2, 'details': 'بجوار المسجد'}, cust)['id']
     order = api('POST', '/api/orders', {'address_id': addr, 'items': [{'product_id': pid, 'qty': 1}]}, cust)
+    cust2 = token('967755000333', 'عميل ثاني رباعي الاسم')
+    addr2 = api('POST', '/api/addresses', {'label': 'العمل', 'zone_id': zone, 'lat': 15.40, 'lng': 44.25, 'details': 'شارع الزبيري'}, cust2)['id']
+    order2 = api('POST', '/api/orders', {'address_id': addr2, 'items': [{'product_id': pid, 'qty': 1}]}, cust2)
     drv = token('967766000222', 'مندوب توصيل رباعي الاسم'); drv_id = api('GET', '/api/me', None, drv)['id']
     api('POST', f'/api/admin/users/{drv_id}/role', {'role': 'driver'}, admin)
     api('POST', f'/api/admin/orders/{order["id"]}/assign', {'driver_id': drv_id}, admin)
+    api('POST', f'/api/admin/orders/{order2["id"]}/assign', {'driver_id': drv_id}, admin)
 
     with sync_playwright() as p:
-        b = p.chromium.launch(); pg = b.new_context(viewport={'width': 420, 'height': 900}).new_page()
+        b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 420, 'height': 900}); pg = ctx.new_page()
         pg.on('pageerror', lambda e: errors.append(str(e)))
         pg.goto(BASE + '/')
         pg.fill('input[placeholder^="رقم الهاتف"]', '967766000222'); pg.fill('input[placeholder^="الاسم"]', 'مندوب توصيل رباعي الاسم')
@@ -43,13 +47,22 @@ try:
         t = pg.inner_text('#app')
         check('driver sees stop with customer, address details and COD to collect', 'عميل توصيل' in t and 'بجوار المسجد' in t and 'تحصيل' in t)
         check('map link uses the customer coordinates', pg.get_attribute('a:has-text("فتح الخريطة")', 'href') == 'geo:15.35,44.2')
-        pg.click('button:has-text("تم التسليم")'); pg.wait_for_selector('text=تم التسليم', state='detached')
-        pg.wait_for_function("document.querySelectorAll('.card').length === 0 || !document.body.innerText.includes('عميل توصيل')")
-        check('stop removed after delivery', 'عميل توصيل' not in pg.inner_text('#app'))
+        check('route sketch shows 2 numbered stops', pg.locator('svg g circle').count() == 2)
+        pg.locator('.card:has-text("عميل توصيل")').locator('button:has-text("تم التسليم")').click()
+        pg.wait_for_function("() => !document.body.innerText.includes('عميل توصيل')")
+        check('stop removed after online delivery', 'عميل توصيل' not in pg.inner_text('#app'))
+        # offline: cached route stays usable, delivery is queued and synced on reconnect
+        pg.reload(); pg.wait_for_selector('nav button:has-text("المندوب")'); pg.click('nav button:has-text("المندوب")'); pg.wait_for_selector('.card:has-text("عميل ثاني")')
+        ctx.set_offline(True)
+        pg.locator('.card:has-text("عميل ثاني")').locator('button:has-text("تم التسليم")').click()
+        pg.wait_for_function("() => JSON.parse(localStorage.tw_deliveries||'[]').length===1")
+        check('offline delivery queued locally and stop hidden', 'عميل ثاني' not in pg.inner_text('#app'))
+        ctx.set_offline(False); pg.evaluate("window.dispatchEvent(new Event('online'))")
+        pg.wait_for_function("() => JSON.parse(localStorage.tw_deliveries||'[]').length===0", timeout=10000)
         b.close()
-    o = api('GET', '/api/orders', None, cust)[0]
-    check('order marked delivered on server', o['status'] == 'delivered')
-    check('stock decremented exactly once by the order (2 left)', api('GET', '/api/products')[0]['stock'] == 2)
+    o = api('GET', '/api/orders', None, cust)[0]; o2 = api('GET', '/api/orders', None, cust2)[0]
+    check('both orders delivered on server', o['status'] == 'delivered' and o2['status'] == 'delivered')
+    check('stock decremented once per order (1 left of 3)', api('GET', '/api/products')[0]['stock'] == 1)
 finally:
     srv.terminate()
 check('no JS errors', not errors)

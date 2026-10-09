@@ -38,7 +38,7 @@ async function syncCatalog() {
 }
 async function flushQueue() {
   const q = cache.get('tw_queue', []), rest = [];
-  for (const o of q) { try { await api('POST', '/api/orders', o); } catch (e) { if (!navigator.onLine || e instanceof TypeError) rest.push(o); } }
+  for (const o of q) { try { await api('POST', '/api/orders', o); } catch (e) { if (!navigator.onLine || e instanceof TypeError || e.message === 'يلزم تسجيل الدخول') rest.push(o); } }
   cache.set('tw_queue', rest);
   if (q.length && !rest.length) toast('تمت مزامنة الطلبات المحفوظة');
 }
@@ -138,17 +138,44 @@ async function ordersView() {
       x.status === 'out_for_delivery' && featureOn('live_tracking') ? h('a', { class: 'btn', href: `${BASE}/api/track/${x.track_token}`, target: '_blank' }, 'تتبع المندوب') : null)));
 }
 
-// ---------- driver ----------
-async function driverView() {
-  const { stops } = await api('GET', '/api/driver/route');
-  cache.set('tw_route', stops);
-  const share = h('button', { onclick: () => navigator.geolocation?.getCurrentPosition((p) => api('POST', '/api/driver/location', { lat: p.coords.latitude, lng: p.coords.longitude }).then(() => toast('تم تحديث موقعك'))) }, 'مشاركة موقعي');
-  return h('div', {}, share, stops.map((s, i) => h('div', { class: 'card' }, h('b', {}, `${i + 1}. ${s.customer}`), h('div', { class: 'mute' }, `${s.phone} — ${s.details ?? ''}`),
-    s.cod_due ? h('div', { class: 'price' }, `تحصيل: ${money(s.cod_due)}`) : null,
-    s.lat != null ? h('a', { class: 'btn', href: `geo:${s.lat},${s.lng}` }, 'فتح الخريطة') : null,
-    h('button', { onclick: guard(async () => { await api('POST', `/api/driver/orders/${s.order_id}/deliver`); render(); }) }, 'تم التسليم'))));
+// ---------- driver (works offline: cached route + queued deliveries) ----------
+function routeSketch(stops) {
+  const pts = stops.map((s, i) => ({ s, i })).filter((x) => x.s.lat != null && x.s.lng != null);
+  const NS = 'http://www.w3.org/2000/svg', W = 320, H = 200, pad = 24, el = (t, a = {}) => { const e = document.createElementNS(NS, t); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': 'مخطط المحطات' });
+  svg.append(el('rect', { width: W, height: H, rx: 12, fill: '#1a1e14', stroke: '#434d35' }));
+  if (!pts.length) return svg;
+  const la = pts.map((x) => x.s.lat), ln = pts.map((x) => x.s.lng), minA = Math.min(...la), maxA = Math.max(...la), minN = Math.min(...ln), maxN = Math.max(...ln);
+  const sx = (v) => (maxN === minN ? W / 2 : pad + ((v - minN) / (maxN - minN)) * (W - 2 * pad)), sy = (v) => (maxA === minA ? H / 2 : H - pad - ((v - minA) / (maxA - minA)) * (H - 2 * pad));
+  svg.append(el('polyline', { points: pts.map((x) => `${sx(x.s.lng)},${sy(x.s.lat)}`).join(' '), fill: 'none', stroke: '#6b7a52', 'stroke-width': 2, 'stroke-dasharray': '5 4' }));
+  for (const x of pts) { const g = el('g'); g.append(el('circle', { cx: sx(x.s.lng), cy: sy(x.s.lat), r: 11, fill: '#d9c98a' })); const t = el('text', { x: sx(x.s.lng), y: sy(x.s.lat) + 5, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: '#1f2418' }); t.textContent = x.i + 1; g.append(t); svg.append(g); }
+  return svg;
 }
-
+async function flushDeliveries() {
+  const q = cache.get('tw_deliveries', []), rest = [];
+  for (const id of q) { try { await api('POST', `/api/driver/orders/${id}/deliver`); } catch (e) { if (!navigator.onLine || e instanceof TypeError || e.message === 'يلزم تسجيل الدخول') rest.push(id); } }
+  cache.set('tw_deliveries', rest);
+  if (q.length && !rest.length) toast('تمت مزامنة التسليمات');
+}
+addEventListener('online', () => { flushDeliveries().then(() => st.tab === 'driver' && render()); });
+async function driverView() {
+  let stops;
+  try { ({ stops } = await api('GET', '/api/driver/route')); cache.set('tw_route', stops); }
+  catch (e) { if (navigator.onLine && !(e instanceof TypeError)) throw e; stops = cache.get('tw_route', []); toast('دون اتصال: عرض المسار المحفوظ'); }
+  const done = new Set(cache.get('tw_deliveries', [])); stops = stops.filter((x) => !done.has(x.order_id));
+  const pending = cache.get('tw_deliveries', []).length;
+  const share = h('button', { onclick: () => navigator.geolocation?.getCurrentPosition((p) => api('POST', '/api/driver/location', { lat: p.coords.latitude, lng: p.coords.longitude }).then(() => toast('تم تحديث موقعك')).catch(() => toast('تعذر الإرسال دون اتصال'))) }, 'مشاركة موقعي');
+  const deliver = (s) => guard(async () => {
+    try { await api('POST', `/api/driver/orders/${s.order_id}/deliver`); }
+    catch (e) { if (navigator.onLine && !(e instanceof TypeError)) throw e; cache.set('tw_deliveries', [...cache.get('tw_deliveries', []), s.order_id]); cache.set('tw_route', cache.get('tw_route', []).filter((x) => x.order_id !== s.order_id)); toast('حُفظ التسليم وسيُرسل عند عودة الاتصال'); }
+    render();
+  });
+  return h('div', {}, pending ? h('div', { class: 'card' }, `${pending} تسليم بانتظار المزامنة`) : null, h('div', { class: 'row' }, share), h('div', { class: 'card' }, h('div', { class: 'mute' }, 'مخطط تقريبي للمحطات بالترتيب (ليس خريطة طرق)'), routeSketch(stops)),
+    stops.map((s, i) => h('div', { class: 'card' }, h('b', {}, `${i + 1}. ${s.customer}`), h('div', { class: 'mute' }, `${s.phone} — ${s.details ?? ''}`),
+      s.cod_due ? h('div', { class: 'price' }, `تحصيل: ${money(s.cod_due)}`) : null,
+      s.lat != null ? h('a', { class: 'btn', href: `geo:${s.lat},${s.lng}` }, 'فتح الخريطة') : null,
+      h('button', { onclick: deliver(s) }, 'تم التسليم'))));
+}
 
 // ---------- image processor (runs in the browser; toggled by the image_processor feature) ----------
 async function processImage(file, enhance) {
@@ -308,4 +335,4 @@ async function vaultOpen() {
 
 if ('serviceWorker' in navigator && !preview) navigator.serviceWorker.register('/sw.js').catch(() => {});
 if (preview) { $('#banner').className = 'banner'; $('#banner').textContent = 'وضع المعاينة'; }
-syncCatalog().then(flushQueue).then(render);
+syncCatalog().then(flushQueue).then(() => (st.token ? flushDeliveries() : null)).then(render);
