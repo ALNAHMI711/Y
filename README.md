@@ -50,13 +50,15 @@ ADMIN_PHONE=967700000001 DEV_OTP=1 npm start   # http://localhost:3000
 
 ## النشر والنسخ الاحتياطي
 
+يعمل فحص تلقائي على GitHub (Actions ← Server tests) لاختبارات الخادم مع كل رفع.
+
 ```bash
 docker build -t thaqafat-watan .
 docker run -d --name tw -p 3000:3000 -v tw-data:/data \
   -e ADMIN_PHONE=967700000001 -e SUPPORT_PHONE=... -e INGEST_KEY=... \
   -e WA_TOKEN=... -e WA_PHONE_ID=... -e ANTHROPIC_API_KEY=... thaqafat-watan
 ```
-(ملف Docker **لم يُبنَ فعلياً**: لا يوجد docker daemon في بيئة التطوير. جرّبت فقط أمر التشغيل نفسه بالمسارات ذاتها.) ضع خلفه وكيلاً بـ HTTPS (Caddy/nginx/منصة استضافة).
+أو على VPS بأمر واحد مع HTTPS تلقائي: `cp .env.example .env` ثم عدّله (ضع `DOMAIN` يشير لخادمك) ثم `docker compose up -d --build`. (ملفا Docker و`docker-compose.yml` **لم يُبنيا فعلياً**: لا يوجد docker daemon في بيئة التطوير. جرّبت فقط أمر التشغيل نفسه بالمسارات ذاتها.) ضع خلفه وكيلاً بـ HTTPS (Caddy/nginx/منصة استضافة).
 
 - **نسخ تلقائي**: لقطة يومية في `DATA_DIR/backups` تحتفظ بآخر `BACKUP_KEEP` (افتراضي 14)؛ ويدوياً من «التقارير ← نسخة احتياطية» أو `POST /api/admin/backups`.
 - **الاستعادة**: أوقف الخادم، انسخ ملف `app-….db` فوق `DATA_DIR/app.db` (واحذف `app.db-wal` و`app.db-shm`)، ثم شغّل الخادم. جُرّبت قراءة النسخة في الاختبارات.

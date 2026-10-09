@@ -1,7 +1,6 @@
 name: Server tests
 on:
-  push:
-    branches: [main]
+  push: { branches: [main] }
   pull_request:
 jobs:
   test:
@@ -11,6 +10,6 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: node --version
-      - name: Run server tests (no npm dependencies needed)
+      - name: Run server tests (zero dependencies)
         working-directory: server
         run: npm test
