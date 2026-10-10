@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS audit(
 CREATE TABLE IF NOT EXISTS feature_requests(
   id INTEGER PRIMARY KEY, requester INTEGER, request TEXT NOT NULL, card TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'analyzed', at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS backup_targets(
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, token_enc TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+  last_status TEXT, last_at TEXT);
 CREATE TABLE IF NOT EXISTS changes(
   seq INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, entity_id INTEGER, op TEXT NOT NULL);
 `;

@@ -288,3 +288,58 @@ test('vendor/me reports registration state', async () => {
   assert.deepEqual((await api('GET', '/api/vendor/me', { token: u })).data.status, 'pending');
   assert.equal((await api('GET', '/api/vendor/me')).status, 401);
 });
+
+test('backup targets: SSRF guard and off-site upload', async () => {
+  const { assertPublicHttps, isPrivateIp } = await import('../src/targets.js');
+  for (const ip of ['127.0.0.1', '10.0.0.5', '172.16.1.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1']) assert.equal(isPrivateIp(ip), true, ip);
+  for (const ip of ['8.8.8.8', '1.1.1.1', '2606:4700::1111']) assert.equal(isPrivateIp(ip), false, ip);
+  const pub = async () => [{ address: '93.184.216.34' }];
+  await assert.rejects(() => assertPublicHttps('http://example.com/x', pub), /https/);
+  await assert.rejects(() => assertPublicHttps('https://user:pw@example.com/x', pub), /بيانات/);
+  await assert.rejects(() => assertPublicHttps('https://localhost/x', async () => [{ address: '127.0.0.1' }]), /داخلي/);
+  await assert.rejects(() => assertPublicHttps('https://rebind.example/x', async () => [{ address: '93.184.216.34' }, { address: '10.0.0.1' }]), /داخلي/);
+  await assert.rejects(() => assertPublicHttps('https://[::1]/x', pub), /داخلي/);
+  await assertPublicHttps('https://backup.example.com/dir', pub);
+
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'twtg-')), got = [];
+  const a = createApp({ otpLimit: 1000, devOtp: true, adminPhone: '967700000001', backupDir: dir, dnsLookup: pub, whatsapp: { async send() {} },
+    uploader: async (t, name, body) => { if (t.url.includes('down')) throw new Error('HTTP 500'); got.push({ url: t.url, token: t.token, name, size: body.length }); } });
+  await new Promise((r) => a.server.listen(0, r));
+  const b = `http://127.0.0.1:${a.server.address().port}`;
+  const J = async (m, p, t, body) => { const r = await fetch(b + p, { method: m, headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, data: await r.json() }; };
+  const o = (await J('POST', '/api/auth/request-otp', null, { phone: '967700000001' })).data;
+  const t = (await J('POST', '/api/auth/verify', null, { phone: '967700000001', code: o.dev_code, name: 'مدير النظام الاول الرئيسي' })).data.token;
+  assert.equal((await J('POST', '/api/admin/backup-targets', t, { name: 'x', url: 'http://insecure.example.com' })).status, 400);
+  const ok1 = (await J('POST', '/api/admin/backup-targets', t, { name: 'سيرفري', url: 'https://backup.example.com/tw', token: 'secret-token' })).data.id;
+  await J('POST', '/api/admin/backup-targets', t, { name: 'معطل', url: 'https://down.example.com/tw' });
+  const list = (await J('GET', '/api/admin/backup-targets', t)).data;
+  assert.equal(list.length, 2); assert.ok(!JSON.stringify(list).includes('secret-token'), 'token never returned'); assert.equal(list[0].has_token, 1);
+  assert.ok(!JSON.stringify(a.db.prepare('SELECT token_enc FROM backup_targets').all()).includes('secret-token'), 'token encrypted at rest');
+  const made = (await J('POST', '/api/admin/backups', t)).data;
+  assert.equal(got.length, 1); assert.equal(got[0].token, 'secret-token'); assert.equal(got[0].name, made.name); assert.ok(got[0].size > 1000);
+  assert.deepEqual(made.uploads.map((u) => u.status.startsWith('error') ? 'err' : u.status), ['ok', 'err']);
+  assert.equal((await J('POST', `/api/admin/backup-targets/${ok1}/test`, t)).status, 200);
+  const cust = (await J('POST', '/api/auth/request-otp', null, { phone: '967711234567' })).data;
+  const ct = (await J('POST', '/api/auth/verify', null, { phone: '967711234567', code: cust.dev_code, name: 'عميل عادي رباعي الاسم' })).data.token;
+  assert.equal((await J('GET', '/api/admin/backup-targets', ct)).status, 403);
+  a.server.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('httpPutUploader builds the PUT request correctly and refuses redirects', async () => {
+  const { httpPutUploader } = await import('../src/targets.js');
+  const real = globalThis.fetch, calls = [];
+  globalThis.fetch = async (url, init) => { calls.push({ url: String(url), init }); return { ok: true, status: 200 }; };
+  try {
+    const pub = async () => [{ address: '93.184.216.34' }];
+    await httpPutUploader({ url: 'https://store.example.com/backups', token: 'tok' }, 'app-20261010T000000Z.db', Buffer.from('data'), pub);
+    assert.equal(calls[0].url, 'https://store.example.com/backups/app-20261010T000000Z.db');
+    assert.equal(calls[0].init.method, 'PUT'); assert.equal(calls[0].init.redirect, 'error');
+    assert.equal(calls[0].init.headers.authorization, 'Bearer tok');
+    await httpPutUploader({ url: 'https://store.example.com/b/' }, 'x.db', Buffer.from('d'), pub);
+    assert.equal(calls[1].url, 'https://store.example.com/b/x.db'); assert.equal(calls[1].init.headers.authorization, undefined);
+    globalThis.fetch = async () => ({ ok: false, status: 403 });
+    await assert.rejects(() => httpPutUploader({ url: 'https://store.example.com/b' }, 'x.db', Buffer.from('d'), pub), /HTTP 403/);
+    await assert.rejects(() => httpPutUploader({ url: 'https://store.example.com/b' }, 'x.db', Buffer.from('d'), async () => [{ address: '10.1.1.1' }]), /داخلي/);
+  } finally { globalThis.fetch = real; }
+});

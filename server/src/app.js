@@ -8,6 +8,7 @@ import { createServices, parseWalletSms, refHash, normDigits } from './services.
 import { buildXlsx } from './xlsx.js';
 import { anthropicAnalyzer, ruleBasedAnalyzer, normalizeCard } from './copilot.js';
 import { createBackup, listBackups, isBackupName } from './backup.js';
+import { assertPublicHttps, httpPutUploader } from './targets.js';
 import { Router, HttpError, bad, forbidden, notFound, readJson, signToken, verifyToken, hashSecret, checkSecret, encrypt, decrypt, sha256, rateLimiter } from './util.js';
 
 const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web');
@@ -19,6 +20,8 @@ export function createApp(opts = {}) {
   const encKey = opts.encKey ?? crypto.randomBytes(32);
   const sender = opts.whatsapp ?? { async send(phone, text) { console.log(`[whatsapp:stub] -> ${phone}: ${text}`); } };
   const backupDir = opts.backupDir ?? null;
+  const uploader = opts.uploader ?? ((t, name, body) => httpPutUploader(t, name, body, opts.dnsLookup));
+  const lookupOpt = opts.dnsLookup;
   const supportPhone = opts.supportPhone ?? null;
   const ingestKey = opts.ingestKey ?? null;
   const devOtp = opts.devOtp ?? false;
@@ -337,8 +340,34 @@ export function createApp(opts = {}) {
     return { ok: true, note: body.decision === 'approved' ? 'سُجّل الطلب في قائمة التنفيذ؛ التنفيذ والنشر يتمان بمراجعة مطوّر.' : undefined };
   });
 
+  async function pushBackup(name) {
+    const file = backupDir && fs.readFileSync(path.join(backupDir, name));
+    const results = [];
+    for (const t of q('SELECT * FROM backup_targets WHERE enabled=1')) {
+      let status = 'ok';
+      try { await uploader({ url: t.url, token: t.token_enc ? decrypt(t.token_enc, encKey) : null }, name, file); }
+      catch (e) { status = `error: ${String(e.message).slice(0, 120)}`; }
+      run('UPDATE backup_targets SET last_status=?, last_at=? WHERE id=?', status, now().toISOString(), t.id);
+      results.push({ id: t.id, name: t.name, status });
+    }
+    return results;
+  }
+  R('GET', '/api/admin/backup-targets', 'admin', () => q('SELECT id,name,url,enabled,last_status,last_at,(token_enc IS NOT NULL) has_token FROM backup_targets ORDER BY id'));
+  R('POST', '/api/admin/backup-targets', 'admin', async ({ user, body }) => {
+    const name = String(body.name || '').trim(); if (!name) throw bad('اسم الوجهة مطلوب');
+    if (q('SELECT id FROM backup_targets').length >= 5) throw bad('الحد الأقصى 5 وجهات');
+    await assertPublicHttps(String(body.url || ''), lookupOpt);
+    const r = run('INSERT INTO backup_targets(name,url,token_enc) VALUES(?,?,?)', name, String(body.url), body.token ? encrypt(String(body.token), encKey) : null);
+    S.audit(user.id, 'backup_target.add', { id: r.lastInsertRowid, name, url: body.url }); return { id: r.lastInsertRowid };
+  });
+  R('DELETE', '/api/admin/backup-targets/:id', 'admin', ({ user, params }) => { run('DELETE FROM backup_targets WHERE id=?', params.id); S.audit(user.id, 'backup_target.delete', { id: params.id }); return { ok: true }; });
+  R('POST', '/api/admin/backup-targets/:id/test', 'admin', async ({ user, params }) => {
+    const t = one('SELECT * FROM backup_targets WHERE id=?', params.id); if (!t) throw notFound();
+    try { await uploader({ url: t.url, token: t.token_enc ? decrypt(t.token_enc, encKey) : null }, 'tw-connection-test.txt', Buffer.from('ok')); run("UPDATE backup_targets SET last_status='ok', last_at=? WHERE id=?", now().toISOString(), t.id); S.audit(user.id, 'backup_target.test', { id: t.id, ok: true }); return { ok: true }; }
+    catch (e) { run('UPDATE backup_targets SET last_status=?, last_at=? WHERE id=?', `error: ${String(e.message).slice(0, 120)}`, now().toISOString(), t.id); throw bad(`فشل الاتصال: ${String(e.message).slice(0, 120)}`); }
+  });
   R('GET', '/api/admin/backups', 'admin', () => { if (!backupDir) throw bad('النسخ الاحتياطي غير مفعّل'); return listBackups(backupDir); });
-  R('POST', '/api/admin/backups', 'admin', async ({ user }) => { if (!backupDir) throw bad('النسخ الاحتياطي غير مفعّل'); const name = await createBackup(db, backupDir, opts.backupKeep ?? 14, now()); S.audit(user.id, 'backup.create', { name }); return { name }; });
+  R('POST', '/api/admin/backups', 'admin', async ({ user }) => { if (!backupDir) throw bad('النسخ الاحتياطي غير مفعّل'); const name = await createBackup(db, backupDir, opts.backupKeep ?? 14, now()); S.audit(user.id, 'backup.create', { name }); return { name, uploads: await pushBackup(name) }; });
   R('GET', '/api/admin/backups/:name', 'admin', ({ user, params }) => {
     if (!backupDir || !isBackupName(params.name) || !fs.existsSync(path.join(backupDir, params.name))) throw notFound();
     S.audit(user.id, 'backup.download', { name: params.name });
@@ -446,5 +475,5 @@ export function createApp(opts = {}) {
     res.writeHead(200, { 'content-type': MIME[path.extname(f)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'" }); fs.createReadStream(f).pipe(res);
   }
   const server = http.createServer(handle);
-  return { server, db, services: S, handle };
+  return { server, db, services: S, handle, pushBackup };
 }

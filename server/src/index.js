@@ -17,7 +17,7 @@ const secret = process.env.APP_SECRET ?? secretFile('app.secret', 32).toString('
 const encKey = process.env.ENC_KEY ? Buffer.from(process.env.ENC_KEY, 'hex') : secretFile('enc.key', 32);
 if (encKey.length !== 32) throw new Error('ENC_KEY must be 64 hex chars');
 
-const { server, services, db } = createApp({
+const { server, services, db, pushBackup } = createApp({
   dbPath: path.join(dataDir, 'app.db'), secret, encKey,
   adminPhone: process.env.ADMIN_PHONE, supportPhone: process.env.SUPPORT_PHONE,
   whatsapp: whatsappSender({ token: process.env.WA_TOKEN, phoneId: process.env.WA_PHONE_ID, template: process.env.WA_TEMPLATE }),
@@ -28,7 +28,7 @@ const { server, services, db } = createApp({
 });
 setInterval(() => services.releaseDue(), 60 * 60 * 1000).unref();
 // daily snapshot (first one shortly after start), keeps the newest BACKUP_KEEP files
-const snap = () => createBackup(db, path.join(dataDir, 'backups'), Number(process.env.BACKUP_KEEP ?? 14)).catch((e) => console.error('backup failed:', e.message));
+const snap = () => createBackup(db, path.join(dataDir, 'backups'), Number(process.env.BACKUP_KEEP ?? 14)).then(pushBackup).catch((e) => console.error('backup failed:', e.message));
 setTimeout(snap, 30_000).unref(); setInterval(snap, 24 * 60 * 60 * 1000).unref();
 const port = Number(process.env.PORT ?? 3000);
 server.listen(port, () => console.log(`Thaqafat Watan server on :${port}`));

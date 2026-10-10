@@ -225,9 +225,9 @@ function vendorRegisterView() {
 // ---------- admin ----------
 let adminTab = 'preview';
 async function adminView() {
-  const tabs = [['preview', 'المعاينة'], ['reports', 'التقارير'], ['features', 'الميزات'], ['catalog', 'المنتجات والمناطق'], ['vendors', 'التجار'], ['transfers', 'التحويلات'], ['copilot', 'المساعد'], ['vault', 'الخزنة']];
+  const tabs = [['preview', 'المعاينة'], ['reports', 'التقارير'], ['features', 'الميزات'], ['catalog', 'المنتجات والمناطق'], ['vendors', 'التجار'], ['transfers', 'التحويلات'], ['copilot', 'المساعد'], ['backups', 'النسخ'], ['vault', 'الخزنة']];
   const bar = h('div', { class: 'row card' }, tabs.map(([k, l]) => h('button', { class: adminTab === k ? '' : 'ghost', onclick: () => { adminTab = k; render(); } }, l)));
-  const pages = { preview: previewPane, reports: reportsPane, features: featuresPane, catalog: catalogPane, vendors: vendorsPane, transfers: transfersPane, copilot: copilotPane, vault: vaultPane };
+  const pages = { preview: previewPane, reports: reportsPane, features: featuresPane, catalog: catalogPane, vendors: vendorsPane, transfers: transfersPane, copilot: copilotPane, backups: backupsPane, vault: vaultPane };
   return h('div', {}, bar, await pages[adminTab]());
 }
 async function previewPane() {
@@ -270,6 +270,18 @@ async function transfersPane() {
 }
 
 
+
+
+async function backupsPane() {
+  const ts = await api('GET', '/api/admin/backup-targets');
+  const n = h('input', { placeholder: 'اسم الوجهة (سيرفري الخاص)' }), u = h('input', { placeholder: 'https://... رابط يقبل PUT', dir: 'ltr' }), t = h('input', { placeholder: 'رمز الدخول (اختياري)', type: 'password', dir: 'ltr' });
+  return h('div', {}, h('div', { class: 'card' }, h('div', { class: 'mute' }, 'تُرفع كل نسخة احتياطية تلقائياً إلى وجهاتك (حتى 5). يجب أن يكون الرابط https لخادم عام؛ العناوين الداخلية مرفوضة.'),
+    h('button', { onclick: guard(async () => { const r = await api('POST', '/api/admin/backups'); toast(`نسخة ${r.name}: ${r.uploads.filter((x) => x.status === 'ok').length}/${r.uploads.length} وجهات`); render(); }) }, 'نسخة احتياطية الآن')),
+    ts.map((x) => h('div', { class: 'card' }, h('b', {}, x.name), h('div', { class: 'mute', dir: 'ltr' }, x.url), h('div', { class: x.last_status === 'ok' ? '' : 'mute' }, x.last_status ? `${x.last_status === 'ok' ? '✔' : '✖'} ${x.last_status} — ${x.last_at.slice(0, 16)}` : 'لم تُجرَّب'),
+      h('div', { class: 'row' }, h('button', { class: 'ghost', onclick: guard(async () => { await api('POST', `/api/admin/backup-targets/${x.id}/test`); toast('الاتصال ناجح'); render(); }) }, 'اختبار'),
+        h('button', { class: 'danger', onclick: guard(async () => { if (confirm('حذف هذه الوجهة؟')) { await api('DELETE', `/api/admin/backup-targets/${x.id}`); render(); } }) }, 'حذف')))),
+    h('div', { class: 'card' }, h('h4', {}, 'وجهة جديدة'), n, u, t, h('button', { onclick: guard(async () => { await api('POST', '/api/admin/backup-targets', { name: n.value, url: u.value, token: t.value }); toast('أضيفت الوجهة'); render(); }) }, 'إضافة')));
+}
 
 const VST = { pending: 'قيد المراجعة', active: 'مفعّل', suspended: 'موقوف', deleted: 'محذوف' };
 async function vendorsPane() {

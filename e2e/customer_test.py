@@ -50,10 +50,10 @@ try:
         pg.click('nav button:has-text("المتجر")'); pg.wait_for_selector('.grid .card')
         pg.click('.grid .card button:has-text("أضف")'); pg.wait_for_selector('h3:has-text("السلة")'); pg.wait_for_selector('.mute:has-text("توصيل")')
         ctx.set_offline(True)
-        pg.click('button:has-text("تأكيد الطلب")'); pg.wait_for_function("JSON.parse(localStorage.tw_queue||'[]').length===1")
+        pg.click('button:has-text("تأكيد الطلب")'); pg.wait_for_function("() => JSON.parse(localStorage.tw_queue||'[]').length===1")
         check('offline order queued locally', True)
         ctx.set_offline(False); pg.evaluate("window.dispatchEvent(new Event('online'))")
-        pg.wait_for_function("JSON.parse(localStorage.tw_queue||'[]').length===0", timeout=10000)
+        pg.wait_for_function("() => JSON.parse(localStorage.tw_queue||'[]').length===0", timeout=10000)
         tok = api('POST', '/api/auth/verify', {'phone': '967711000111', 'code': api('POST', '/api/auth/request-otp', {'phone': '967711000111'})['dev_code']})['token']
         o2 = api('GET', '/api/orders', None, tok)
         check('queued order synced exactly once (2 orders, stock 3)', len(o2) == 2 and api('GET', '/api/products')[0]['stock'] == 3)
