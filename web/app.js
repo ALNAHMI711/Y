@@ -42,7 +42,7 @@ async function flushQueue() {
   cache.set('tw_queue', rest);
   if (q.length && !rest.length) toast('تمت مزامنة الطلبات المحفوظة');
 }
-addEventListener('online', () => { flushQueue(); syncCatalog().then(render); });
+addEventListener('online', () => { flushQueue(); flushDeliveries(); syncCatalog().then(render); });
 const featureOn = (k) => cache.get('tw_features', []).find((f) => f.key === k)?.enabled !== 0;
 
 // ---------- layout ----------
@@ -158,37 +158,49 @@ async function flushDeliveries() {
   if (q.length && !rest.length) toast('تمت مزامنة التسليمات');
 }
 addEventListener('online', () => { flushDeliveries().then(() => st.tab === 'driver' && render()); });
+// Schematic route map: drawn locally from stop coordinates (no map tiles), so it works fully offline.
+function routeMap(stops) {
+  const pts = stops.map((x, i) => ({ ...x, n: i + 1 })).filter((x) => x.lat != null);
+  if (!pts.length) return null;
+  const NS = 'http://www.w3.org/2000/svg', W = 360, H = 220, P = 26;
+  const kx = Math.cos((pts.reduce((a, x) => a + x.lat, 0) / pts.length) * Math.PI / 180);
+  const xs = pts.map((x) => x.lng * kx), ys = pts.map((x) => -x.lat);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const sc = Math.min((W - 2 * P) / (x1 - x0 || 1), (H - 2 * P) / (y1 - y0 || 1));
+  const ox = (W - 2 * P - (x1 - x0) * sc) / 2, oy = (H - 2 * P - (y1 - y0) * sc) / 2;
+  const at = (i) => [P + ox + (xs[i] - x0) * sc, P + oy + (ys[i] - y0) * sc];
+  const el = (tag, attrs, txt) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (txt != null) e.textContent = txt; return e; };
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'routemap', role: 'img', 'aria-label': 'مخطط مسار التوصيل' });
+  if (pts.length > 1) svg.append(el('polyline', { points: pts.map((_, i) => at(i).join(',')).join(' '), fill: 'none', stroke: '#6b7a55', 'stroke-width': 3, 'stroke-dasharray': '6 5' }));
+  pts.forEach((x, i) => { const [cx, cy] = at(i); svg.append(el('circle', { cx, cy, r: 13, fill: i === 0 ? '#d9c98a' : '#3d4a2a', stroke: '#d9c98a', 'stroke-width': 2 }), el('text', { x: cx, y: cy + 5, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: i === 0 ? '#1f2418' : '#ece8d6' }, String(x.n))); });
+  return svg;
+}
+async function flushDeliveries() {
+  const q = cache.get('tw_dq', []), rest = [];
+  for (const id of q) { try { await api('POST', `/api/driver/orders/${id}/deliver`); } catch (e) { if (!navigator.onLine || e instanceof TypeError) rest.push(id); /* other errors: drop, the server decided */ } }
+  cache.set('tw_dq', rest);
+  if (q.length && !rest.length) toast('تمت مزامنة التسليمات');
+}
 async function driverView() {
-  let stops;
+  let stops, offline = false;
   try { ({ stops } = await api('GET', '/api/driver/route')); cache.set('tw_route', stops); }
-  catch (e) { if (navigator.onLine && !(e instanceof TypeError)) throw e; stops = cache.get('tw_route', []); toast('دون اتصال: عرض المسار المحفوظ'); }
-  const done = new Set(cache.get('tw_deliveries', [])); stops = stops.filter((x) => !done.has(x.order_id));
-  const pending = cache.get('tw_deliveries', []).length;
-  const share = h('button', { onclick: () => navigator.geolocation?.getCurrentPosition((p) => api('POST', '/api/driver/location', { lat: p.coords.latitude, lng: p.coords.longitude }).then(() => toast('تم تحديث موقعك')).catch(() => toast('تعذر الإرسال دون اتصال'))) }, 'مشاركة موقعي');
-  const deliver = (s) => guard(async () => {
-    try { await api('POST', `/api/driver/orders/${s.order_id}/deliver`); }
-    catch (e) { if (navigator.onLine && !(e instanceof TypeError)) throw e; cache.set('tw_deliveries', [...cache.get('tw_deliveries', []), s.order_id]); cache.set('tw_route', cache.get('tw_route', []).filter((x) => x.order_id !== s.order_id)); toast('حُفظ التسليم وسيُرسل عند عودة الاتصال'); }
+  catch (e) { if (navigator.onLine && !(e instanceof TypeError)) throw e; stops = cache.get('tw_route', []); offline = true; }
+  const pending = cache.get('tw_dq', []);
+  stops = stops.filter((x) => !pending.includes(x.order_id));
+  const deliver = (x) => guard(async () => {
+    try { await api('POST', `/api/driver/orders/${x.order_id}/deliver`); }
+    catch (e) { if (navigator.onLine && !(e instanceof TypeError)) throw e; cache.set('tw_dq', [...cache.get('tw_dq', []), x.order_id]); toast('لا يوجد اتصال — سيُسجَّل التسليم عند عودة الإنترنت'); }
+    cache.set('tw_route', cache.get('tw_route', []).filter((y) => y.order_id !== x.order_id));
     render();
   });
-  return h('div', {}, pending ? h('div', { class: 'card' }, `${pending} تسليم بانتظار المزامنة`) : null, h('div', { class: 'row' }, share), h('div', { class: 'card' }, h('div', { class: 'mute' }, 'مخطط تقريبي للمحطات بالترتيب (ليس خريطة طرق)'), routeSketch(stops)),
-    stops.map((s, i) => h('div', { class: 'card' }, h('b', {}, `${i + 1}. ${s.customer}`), h('div', { class: 'mute' }, `${s.phone} — ${s.details ?? ''}`),
-      s.cod_due ? h('div', { class: 'price' }, `تحصيل: ${money(s.cod_due)}`) : null,
-      s.lat != null ? h('a', { class: 'btn', href: `geo:${s.lat},${s.lng}` }, 'فتح الخريطة') : null,
-      h('button', { onclick: deliver(s) }, 'تم التسليم'))));
+  const share = h('button', { class: 'ghost', onclick: () => navigator.geolocation?.getCurrentPosition((p) => api('POST', '/api/driver/location', { lat: p.coords.latitude, lng: p.coords.longitude }).then(() => toast('تم تحديث موقعك'))) }, 'مشاركة موقعي');
+  return h('div', {}, offline ? h('div', { class: 'card' }, 'وضع دون اتصال: المسار المحفوظ آخر مرة') : null, pending.length ? h('div', { class: 'card' }, `${pending.length} تسليم بانتظار المزامنة`) : null,
+    share, routeMap(stops), stops.length ? null : h('div', { class: 'card mute' }, 'لا توجد توصيلات'),
+    stops.map((x, i) => h('div', { class: 'card' }, h('b', {}, `${i + 1}. ${x.customer}`), h('div', { class: 'mute' }, `${x.phone} — ${x.details ?? ''}`),
+      x.cod_due ? h('div', { class: 'price' }, `تحصيل: ${money(x.cod_due)}`) : null,
+      x.lat != null ? h('a', { class: 'btn', href: `geo:${x.lat},${x.lng}` }, 'فتح الخريطة') : null,
+      h('button', { onclick: deliver(x) }, 'تم التسليم'))));
 }
-
-// ---------- image processor (runs in the browser; toggled by the image_processor feature) ----------
-async function processImage(file, enhance) {
-  const bmp = await createImageBitmap(file), S = 800, c = document.createElement('canvas'); c.width = c.height = S;
-  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, S, S);
-  const k = Math.min((S - 40) / bmp.width, (S - 40) / bmp.height);
-  if (enhance) x.filter = 'contrast(1.08) saturate(1.1) brightness(1.03)';
-  x.drawImage(bmp, (S - bmp.width * k) / 2, (S - bmp.height * k) / 2, bmp.width * k, bmp.height * k);
-  x.filter = 'none';
-  if (enhance) { x.strokeStyle = '#3d4a2a'; x.lineWidth = 14; x.strokeRect(7, 7, S - 14, S - 14); x.fillStyle = '#3d4a2a'; x.fillRect(0, S - 56, S, 56); x.fillStyle = '#d9c98a'; x.font = 'bold 28px sans-serif'; x.textAlign = 'center'; x.fillText('ثقافة وطن', S / 2, S - 18); }
-  return c.toDataURL('image/jpeg', 0.82);
-}
-
 
 // ---------- vendor ----------
 function fileToJpeg(file, max = 1000) {

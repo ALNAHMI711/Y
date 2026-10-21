@@ -46,6 +46,14 @@ try:
         o = api('GET', '/api/orders', None, api('POST', '/api/auth/verify', {'phone': '967711000111', 'code': api('POST', '/api/auth/request-otp', {'phone': '967711000111'})['dev_code']})['token'])
         check('server has exactly 1 order, total 21000, cod_due 21000', len(o) == 1 and o[0]['total'] == 21000 and o[0]['cod_due'] == 21000)
 
+        # privacy: the service-worker cache must never hold per-user API responses
+        pg.reload(); pg.wait_for_selector('nav button:has-text("المحفظة")'); pg.wait_for_function("navigator.serviceWorker.controller !== null", timeout=10000)
+        pg.click('nav button:has-text("المحفظة")'); pg.wait_for_selector('text=رصيدك')
+        pg.click('nav button:has-text("طلباتي")'); pg.wait_for_selector('.card:has-text("طلب #")'); pg.click('nav button:has-text("المتجر")'); pg.wait_for_selector('.grid .card')
+        keys = pg.evaluate("caches.keys().then(async ns => (await Promise.all(ns.map(n => caches.open(n).then(c => c.keys())))).flat().map(k => new URL(k.url).pathname))")
+        private = [k for k in keys if k.startswith('/api/') and k.split('?')[0] not in ('/api/features', '/api/zones', '/api/products', '/api/sync', '/api/announcements')]
+        check('SW cache holds no per-user API data (found: %s)' % private, not private)
+        check('SW cache holds the app shell', '/app.js' in keys)
         # offline: build the cart while online, drop the network, confirm -> queued; reconnect -> synced
         pg.click('nav button:has-text("المتجر")'); pg.wait_for_selector('.grid .card')
         pg.click('.grid .card button:has-text("أضف")'); pg.wait_for_selector('h3:has-text("السلة")'); pg.wait_for_selector('.mute:has-text("توصيل")')
